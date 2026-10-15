@@ -1,0 +1,17 @@
+[Unit]
+Description=opensonar sonar service (ZeroMQ commands and ping publishing)
+Documentation=file:///usr/share/doc/opensonar/SERVER.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=-/etc/default/opensonar-server
+ExecStart=/opt/opensonar/bin/opensonar server $OPENSONAR_SOURCE $OPENSONAR_ARGS
+DynamicUser=yes
+StateDirectory=opensonar
+WorkingDirectory=/var/lib/opensonar
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

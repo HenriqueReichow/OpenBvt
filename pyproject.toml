@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "opensonar"
+version = "4.1.0"
+description = "Open SDK for P900 and M900 sonars: .son files, images, live network acquisition and viewer"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.9"
+dependencies = ["numpy>=1.21", "pillow>=9"]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering",
+]
+
+[project.optional-dependencies]
+viewer = ["matplotlib>=3.5"]
+server = ["pyzmq>=22"]
+gui = ["pyzmq>=22", "PySide6>=6.4", "pyqtgraph>=0.13", "imageio-ffmpeg>=0.4"]
+video = ["imageio-ffmpeg>=0.4"]
+
+[project.scripts]
+opensonar = "opensonar.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

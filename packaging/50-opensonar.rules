@@ -1,0 +1,10 @@
+// opensonar: users in a local, active session may bring network profiles up and down (the
+// "opensonar-net" profile among them) without a password. Polkit cannot single out one
+// NetworkManager profile, so this is the same scope as Ubuntu's default for desktop users.
+polkit.addRule(function (action, subject) {
+    if ((action.id == "org.freedesktop.NetworkManager.network-control" ||
+         action.id == "org.freedesktop.NetworkManager.settings.modify.own") &&
+        subject.local && subject.active) {
+        return polkit.Result.YES;
+    }
+});

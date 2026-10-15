@@ -1,0 +1,12 @@
+# Settings of opensonar-server.service (off by default):
+#   sudo systemctl enable --now opensonar-server
+# After a change: sudo systemctl restart opensonar-server
+
+# Sonar to connect to at start (IP, ip:port or a .son path); empty = wait for a `connect` command.
+OPENSONAR_SOURCE=""
+
+# Other options of `opensonar server` (see `opensonar server --help`). Examples:
+#   --bind 0.0.0.0              accept clients from other machines (the service has no authentication)
+#   --head 0 --head 3           heads to ping when OPENSONAR_SOURCE is set
+#   --record session.son        record from the start (relative paths go to /var/lib/opensonar)
+OPENSONAR_ARGS="--bind 127.0.0.1"

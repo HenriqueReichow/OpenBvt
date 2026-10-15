@@ -1,0 +1,19 @@
+#!/bin/sh
+# opensonar postrm: removes what the package created at run time (clean uninstall).
+set -e
+case "$1" in
+    remove|purge)
+        if command -v nmcli >/dev/null 2>&1 && nmcli -t general status >/dev/null 2>&1; then
+            nmcli connection delete opensonar-net >/dev/null 2>&1 || true
+        fi
+        rm -rf /opt/opensonar
+        if [ -d /run/systemd/system ]; then
+            systemctl daemon-reload >/dev/null 2>&1 || true
+        fi
+        command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database -q /usr/share/applications || true
+        ;;
+esac
+if [ "$1" = "purge" ]; then
+    rm -rf /var/lib/opensonar /var/lib/private/opensonar
+fi
+exit 0

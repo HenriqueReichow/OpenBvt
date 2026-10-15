@@ -1,0 +1,7 @@
+# opensonar (Ubuntu 22.04, polkit 0.105): the same rule as /usr/share/polkit-1/rules.d/50-opensonar.rules
+[opensonar: activate the sonar network profile without a password]
+Identity=unix-user:*
+Action=org.freedesktop.NetworkManager.network-control;org.freedesktop.NetworkManager.settings.modify.own
+ResultAny=no
+ResultInactive=no
+ResultActive=yes

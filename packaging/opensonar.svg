@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <!-- opensonar icon: a 130° sonar fan with range rings, copper on dark blue (original artwork, MIT) -->
+  <defs>
+    <radialGradient id="fan" cx="128" cy="214" r="118" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffe0b0"/>
+      <stop offset="0.45" stop-color="#e08a3c"/>
+      <stop offset="1" stop-color="#5a2a0c"/>
+    </radialGradient>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="44" fill="#0e1b2c"/>
+  <path d="M128 214 L21.1 164.1 A118 118 0 0 1 234.9 164.1 Z" fill="url(#fan)"/>
+  <g fill="none" stroke="#0e1b2c" stroke-width="5" stroke-opacity="0.55">
+    <path d="M82.7 192.9 A50 50 0 0 1 173.3 192.9"/>
+    <path d="M51.0 178.1 A85 85 0 0 1 205.0 178.1"/>
+    <path d="M128 214 L128 96"/>
+    <path d="M128 214 L60.3 117.3"/>
+    <path d="M128 214 L195.7 117.3"/>
+  </g>
+  <circle cx="128" cy="214" r="9" fill="#ffe0b0"/>
+</svg>

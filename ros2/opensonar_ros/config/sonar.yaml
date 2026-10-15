@@ -1,0 +1,17 @@
+# Example parameters of opensonar_ros/sonar_node (ros2 launch opensonar_ros sonar.launch.py params:=…)
+sonar:
+  ros__parameters:
+    source: "192.168.1.45"        # sonar IP; "127.0.0.1:1149" for the emulator; or a .son path
+    heads: [0, 3]                 # M900/2250: 0 = M2250-130 (2.25 MHz), 3 = M900-130 (900 kHz)
+    range: [10.0]                 # stop range (m) for every head, or [start, stop]; [0.0] = keep the sonar's
+    gain: -1.0                    # < 0 = keep the sonar's
+    replay_speed: 1.0             # .son source: 1 = recorded pace, 0 = as fast as possible
+    tvg: -1.0
+    frame_prefix: "sonar_head"    # frames sonar_head0, sonar_head3
+    server_command: "opensonar server"   # started if no service answers (the .deb puts opensonar on the PATH)
+    publish_image: true           # ~/headN/image   sensor_msgs/Image mono16 (XY fan), best effort
+    publish_raw: true             # ~/headN/raw     opensonar_msgs/RawPing, reliable
+    publish_info: true            # ~/headN/info    opensonar_msgs/SonarInfo, transient_local
+    publish_diagnostics: true     # /diagnostics
+    image_qos_depth: 5
+    raw_qos_depth: 200

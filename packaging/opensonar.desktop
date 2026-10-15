@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=opensonar
+GenericName=Sonar viewer
+Comment=Operate P900 and M900 sonars: live fan, recording, playback
+Exec=opensonar gui
+Icon=opensonar
+Terminal=false
+Categories=Science;Engineering;
+Keywords=sonar;P900;M900;ROV;multibeam;
+StartupWMClass=opensonar

@@ -1,0 +1,27 @@
+#!/bin/sh
+# opensonar postinst: creates the opensonar-net network profile (the only step that needs root).
+set -e
+PROFILE=opensonar-net
+if [ "$1" = "configure" ]; then
+    if command -v nmcli >/dev/null 2>&1 && nmcli -t general status >/dev/null 2>&1; then
+        if ! nmcli -t -f NAME connection show | grep -qx "$PROFILE"; then
+            DEV=$(nmcli -t -f DEVICE,TYPE device | awk -F: '$2=="ethernet"{print $1; exit}')
+            if [ -n "$DEV" ]; then
+                nmcli connection add type ethernet con-name "$PROFILE" ifname "$DEV" \
+                    ipv4.method manual ipv4.addresses 192.168.1.10/24 ipv4.never-default yes \
+                    ipv6.method disabled connection.autoconnect no >/dev/null \
+                    && echo "opensonar: created the network profile $PROFILE (192.168.1.10/24 on $DEV)"
+            else
+                echo "opensonar: no wired card found; the GUI button 'Configure sonar network' creates the profile later"
+            fi
+        fi
+    else
+        echo "opensonar: NetworkManager is not running; the GUI button 'Configure sonar network' creates the profile later"
+    fi
+    if [ -d /run/systemd/system ]; then
+        systemctl daemon-reload >/dev/null 2>&1 || true
+    fi
+    command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database -q /usr/share/applications || true
+    command -v gtk-update-icon-cache >/dev/null 2>&1 && gtk-update-icon-cache -q -f /usr/share/icons/hicolor || true
+fi
+exit 0

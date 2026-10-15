@@ -1,0 +1,15 @@
+vendor/
+samples/
+__pycache__/
+*.pyc
+output/
+*.egg-info/
+
+# packaging output
+build/
+dist/
+
+# ROS 2 workspace output
+ros2/build/
+ros2/install/
+ros2/log/
