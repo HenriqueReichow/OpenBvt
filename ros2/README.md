@@ -57,6 +57,18 @@ Several programs can share the sonar: the GUI and the node can both be clients o
 If the node finds a service already connected to the same source, it reuses it, and on exit it
 only stops pinging (it does not close someone else's service).
 
+### ROS domain
+The node uses the domain of its environment (`ROS_DOMAIN_ID`, default 0); it does not set one. To be
+seen by other nodes, such as a simulation that consumes the sonar topics, it must run in the same
+domain as them:
+```sh
+export ROS_DOMAIN_ID=7          # the same value the simulation uses
+ros2 launch opensonar_ros sonar.launch.py source:=192.168.1.45
+```
+`ros2 topic echo`/`ros2 topic list` also only see the domain they run in, and the `ros2` daemon keeps
+the domain it started with: after changing it, run `ros2 daemon stop`. A busy domain (another
+simulation publishing a lot) can make those commands slow; a separate domain avoids that when testing.
+
 ## Topics
 
 Under the node's namespace (default `/sonar`), for each head N in `heads`:
