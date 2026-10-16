@@ -58,7 +58,11 @@ The images were validated against reference images of the same recordings: corre
 
 ## Supported sonars
 
-For now, the **P900** and **M900** families. More sonar types are planned.
+For now, the **P900** and **M900** families, plus **`.aris` recordings** (read-only, as frames; see
+[`docs/ARIS_FORMAT.md`](docs/ARIS_FORMAT.md)). More sonar types are planned.
+
+Independent project, not affiliated with any manufacturer. It reads file formats and protocols that are
+publicly documented or were analysed for interoperability.
 
 | Model | `.son` revision | Image (correlation with the reference) |
 |---|---|---|

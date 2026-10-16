@@ -19,7 +19,9 @@ with opensonar.open("192.168.1.45") as s:        # or "recording.son", or "ip:po
 
 | `source` | Result |
 |---|---|
-| existing path, or a name ending in `.son` | `FileSonar` (read-only) |
+| a name ending in `.son` | `FileSonar` (read-only) |
+| a name ending in `.aris` | `ArisFileSonar` (read-only, one head whose pings are `Frame`s) |
+| any other existing file | `ApiError` (unknown format) |
 | `"ip"` or `"ip:port"` | `LiveSonar` through the native driver (`opensonar.net`); default port 1149 |
 | `None` | multicast discovery; opens the first sonar that answers |
 
@@ -51,6 +53,17 @@ Live options: `timeout` (s per request, default 10), `sync_clock` (default `True
 | `adjust_range(start, stop)` | live; the values are clamped to `limits`. On a file → `ApiError` |
 | `adjust_gain(g)`, `adjust_tvg(t)` | live; on a file → `ApiError` |
 | `image(ping, kind="xy", smooth=True, crop=False)` | `(u16 image, geometry)`; `kind` is `"xy"` (fan) or `"rtheta"`; `smooth=False` skips the 3×3 mean; `crop=True` (XY) renders only the window within the ping range |
+| `frame(ping)` | the ping as a `Frame` |
+
+On a `.aris` file the head is a `FrameHead`: its pings already are `Frame`s, `config`, `gain`, `tvg` and
+`center_freq` are `None`, `transducers` is empty, and `image()` builds the fan from the frame
+(`smooth` and `crop` do not apply).
+
+## `Frame` (common to every sonar family)
+`number`, `timestamp` (Unix s, UTC), `intensity` (samples × beams; row 0 = nearest range),
+`ranges` (m, increasing), `beam_angles` (rad, increasing; 0 = ahead, + = starboard), `sound_speed` (m/s),
+`vertical_fov` (rad, or `None` when unknown), `n_samples`, `n_beams`.
+`opensonar.frame.to_xy(frame, resolution=None)` → `(XY image, geometry)` for any frame.
 
 ## `Ping` (the same object for the three sources)
 `number`, `timestamp` (Unix s, UTC), `tz_offset` (s), `range_start`, `range_stop` (m),

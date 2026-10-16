@@ -245,8 +245,66 @@ class LiveSonar(Sonar):
         self._net.close()
 
 
+class FrameHead(Head):
+    """Head of a sonar that hands out beamformed frames: its pings already are `Frame`s."""
+
+    def __init__(self, sonar, index, model, first):
+        super().__init__(sonar, index, None)
+        self._model, self._first = model, first
+
+    model = property(lambda self: self._model)
+    transducers = property(lambda self: [])
+    limits = property(lambda self: (float(self._first.ranges[0]), float(self._first.ranges[-1])))
+    gain = tvg = center_freq = property(lambda self: None)
+    sound_speed = property(lambda self: self._first.sound_speed)
+
+    def frame(self, ping):
+        return ping
+
+    def image(self, ping, kind="xy", smooth=True, crop=False):
+        """(image, geometry) of the frame. kind: "xy" (fan) or "rtheta" (row 0 = far range).
+        smooth and crop do not apply: the frame is already beamformed and holds only its window."""
+        if kind == "xy":
+            return _frame.to_xy(ping)
+        if kind == "rtheta":
+            return ping.intensity[::-1], dict(rows=ping.n_samples, cols=ping.n_beams,
+                                              ranges=ping.ranges[::-1], angles=ping.beam_angles)
+        raise ApiError(f"unknown image kind: {kind!r}")
+
+    def __repr__(self):
+        lo, hi = self.limits
+        return f"<Head {self.index} {self.model} {lo:.1f}–{hi:.1f} m, {self._first.n_beams} beams>"
+
+
+class ArisFileSonar(Sonar):
+    """A .aris recording (read-only, one head)."""
+
+    def __init__(self, path):
+        super().__init__(path)
+        from .formats.aris import ArisFile
+        self._file = ArisFile(path)
+        f = self._file
+        self.sonar_type, self.name, self.serial, self.firmware, self.fpga = "aris", f.model, f.serial, "", ""
+        self.clock_offset = 0.0
+        self.heads = [FrameHead(self, 0, f.model, f.frame(0))]
+
+    def _n_pings(self, head):
+        return self._file.n_frames
+
+    def _ping(self, head, i):
+        if not 0 <= i < self._file.n_frames:
+            raise ApiError(f"ping {i} out of range 0..{self._file.n_frames - 1}")
+        return self._file.frame(i)
+
+    def _adjust(self, head, what, value):
+        raise ApiError(f"{what} can only be adjusted live; the file is read-only")
+
+    def close(self):
+        self._file.close()
+
+
 # file extension → Sonar class; each sonar family registers its recording format here
-FILE_FORMATS = {".son": FileSonar}
+FILE_FORMATS = {".son": FileSonar, ".aris": ArisFileSonar}
 
 
 class Stream:
