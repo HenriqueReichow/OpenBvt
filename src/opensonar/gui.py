@@ -42,6 +42,8 @@ def polar(x, y):
     return math.hypot(x, y), math.degrees(math.atan2(x, y))
 
 
+NO_FRAMES = "Connected, but no frames: the sonar may have refused the settings"
+NO_FRAMES_AFTER = 5.0                     # s after connecting without a frame before saying so
 FORMAT_LABELS = (("son", "raw (.son, or .aris for those sonars)"), ("mp4", "MP4 video (as on screen)"), ("npy", "NPY (u16 per ping)"),
                  ("npz", "NPZ (u16 + metadata)"), ("png", "PNG 16 bit"), ("tiff", "TIFF 16 bit"))
 
@@ -397,13 +399,13 @@ def build(service=None, settings=None):
             g = W.QGroupBox("Connection")
             lay = W.QVBoxLayout(g)
             self.btn_network = W.QPushButton("Configure sonar network")
-            self.btn_network.setToolTip("Activates the opensonar-net profile (192.168.1.10/24 on the wired card)")
+            self.btn_network.setToolTip("Activates the opensonar-net profile (192.168.1.10/24 + 169.254.10.10/16 on the wired card)")
             self.btn_network.clicked.connect(self.configure_network)
             lay.addWidget(self.btn_network)
             self.btn_discover = W.QPushButton("Discover sonars")
             self.btn_discover.clicked.connect(self.discover)
-            self.found = W.QTableWidget(0, 3)
-            self.found.setHorizontalHeaderLabels(["Model", "Serial", "IP"])
+            self.found = W.QTableWidget(0, 4)
+            self.found.setHorizontalHeaderLabels(["Model", "Serial", "IP", "State"])
             self.found.horizontalHeader().setStretchLastSection(True)
             self.found.setSelectionBehavior(W.QAbstractItemView.SelectRows)
             self.found.setEditTriggers(W.QAbstractItemView.NoEditTriggers)
@@ -547,7 +549,10 @@ def build(service=None, settings=None):
             self.status_lost = W.QLabel()
             self.status_utc = W.QLabel()
             self.status_clock = W.QLabel()
+            self.status_link = W.QLabel()                      # streaming sonars: no frames, reconnections
+            self.status_link.setStyleSheet("color: #d80; font-weight: bold")
             self.statusBar().addWidget(self.status_conn, 1)
+            self.statusBar().addWidget(self.status_link)
             self.statusBar().addWidget(self.status_cursor)
             for w in (self.status_rec, self.status_rate, self.status_lost, self.status_utc, self.status_clock):
                 self.statusBar().addPermanentWidget(w)
@@ -698,6 +703,11 @@ def build(service=None, settings=None):
                                        ip if family or str(port) == "1149" else f"{ip}:{port}")):
                     self.found.setItem(r, k, QtWidgets.QTableWidgetItem(str(v)))
                 self.found.item(r, 2).setData(QtCore.Qt.UserRole, (family, a.get("SystemType")))
+                if family:                                     # the beacon says whether another program has it
+                    state = "busy (another program)" if a.get("Busy") else "free"
+                else:
+                    state = "unreachable" if a.get("ProbeError") else "free"
+                self.found.setItem(r, 3, QtWidgets.QTableWidgetItem(state))
             if found:
                 self.found.selectRow(0)
             self.statusBar().showMessage(f"{len(found)} sonar(s) found", 4000)
@@ -780,6 +790,7 @@ def build(service=None, settings=None):
             self._call(self.c.disconnect)
             self.act_record.setChecked(False)
             self._set_connected(False)
+            self.status_link.setText("")
             self._rebuild_views()
 
         # --- heads and panels ---
@@ -967,6 +978,15 @@ def build(service=None, settings=None):
             if self._last_msg is not None:
                 self.status_utc.setText("UTC " + self._last_msg.meta["utc"][11:23])
 
+        @staticmethod
+        def link_message(link):
+            """Warning for a sonar that streams frames: none after connecting, or a lost connection."""
+            if not link:
+                return ""
+            if not link["frames"] and link["connected_for"] >= NO_FRAMES_AFTER:
+                return NO_FRAMES
+            return link.get("warning") or ""
+
         def refresh_status(self):
             """Polls the service: recording indicator, playback position, sonar clock offset."""
             if self.info is None:
@@ -994,6 +1014,7 @@ def build(service=None, settings=None):
                 self.status_clock.setText(f"sonar clock {off / 86400:+.0f} days (not set; times corrected)")
             else:
                 self.status_clock.setText(f"sonar clock {off:+.3f} s")
+            self.status_link.setText(self.link_message(st.get("link")))
             pb = st.get("playback")
             if pb and pb["n_pings"]:
                 n = pb["n_pings"]

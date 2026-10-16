@@ -57,6 +57,18 @@ Several programs can share the sonar: the GUI and the node can both be clients o
 If the node finds a service already connected to the same source, it reuses it, and on exit it
 only stops pinging (it does not close someone else's service).
 
+### Simulator imaging-sonar output
+Set `sim_imaging_sonar_type` to the simulator's message type (`"<package>/msg/<Type>"`). If it is empty,
+or that package is not installed in the environment, the node runs without this topic (a warning says
+so). The message must have these fields:
+
+| Field | Filled with |
+|---|---|
+| `header` | ping time (UTC) and the head frame, as on the other topics |
+| `bins_range`, `bins_azimuth` | the size of this ping's R-Theta image (they change with the range) |
+| `raw_image` | `sensor_msgs/Image` 32FC1, 0–1 (u8 frames / 255, u16 images / 65535); rows = range, row 0 the nearest; columns = azimuth, **column 0 the right-most (starboard) beam**, as the simulator fills them (its azimuth is positive to the left and the columns start at the minimum) |
+| `intensity`, `elevation`, `point_cloud` | **empty**: they are the simulator's ground truth, which a real sonar does not have |
+
 ### ROS domain
 The node uses the domain of its environment (`ROS_DOMAIN_ID`, default 0); it does not set one. To be
 seen by other nodes, such as a simulation that consumes the sonar topics, it must run in the same
@@ -77,6 +89,7 @@ Under the node's namespace (default `/sonar`), for each head N in `heads`:
 |---|---|---|---|
 | `headN/image` | `sensor_msgs/Image` `mono16` | best effort, depth 5 | XY fan, cropped to the range; row 0 = farthest, the sonar at the bottom centre |
 | `headN/raw` | `opensonar_msgs/RawPing` | reliable, depth 200 | P900/M900: raw 12-bit signal of every transducer (+ Q), bins/resolution of this ping, compact configuration |
+| `headN/sim_imaging_sonar` | the type in `sim_imaging_sonar_type` | reliable | optional, both families: the ping in a simulator's imaging-sonar message, so a digital twin takes real and simulated sonars the same way (below) |
 | `headN/frame` | `opensonar_msgs/BeamFrame` | reliable, depth 200 | `.aris` family (instead of `raw`): u8 intensities, samples × beams (row 0 = nearest), range start and step, beam angles (+ left) |
 | `headN/info` | `opensonar_msgs/SonarInfo` | reliable, **transient_local** | head description, published on connect and when range, gain, TVG, sound speed or the ping rate (> 10 %) change |
 | `status` | `opensonar_msgs/SonarStatus` | depth 10, 1 Hz | connection, pinging, published/received/lost pings, recording, clock offset, error |

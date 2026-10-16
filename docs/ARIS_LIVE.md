@@ -8,7 +8,7 @@ Driver: `opensonar.aris_net`; API: `opensonar.open(host, family="aris")`; emulat
 |---|---|
 | Discovery | the sonar broadcasts an availability beacon to UDP **56124** |
 | Commands | TCP **56888**; each command is a protobuf `Command` preceded by its size (u32, big-endian) |
-| Frames | UDP to the port (and optionally IP) set by `SET_FRAMESTREAM_RECEIVER`; one frame in several parts |
+| Frames | UDP to the port (and optionally IP) set by `SET_FRAMESTREAM_RECEIVER`; one frame in several parts. The driver asks for the fixed port **56125** (`frame_port`, 0 = any), so a firewall rule can allow it |
 | Keepalive | a `PING` command every second; without it the sonar stops sending |
 
 Protobuf is encoded and decoded by hand (`encode`/`decode`): varint, fixed32 and length-delimited
@@ -69,10 +69,27 @@ channels, and channel *c* of ping *p* goes to beam `p + map[c]·pings` with
 `map = 10 2 14 6 8 0 12 4 11 3 15 7 9 1 13 5` and pings per frame 3, 6, 4, 8 for ping modes 1, 3, 6, 9
 (`formats.aris.reorder`). The header layout is the one in [`ARIS_FORMAT.md`](ARIS_FORMAT.md).
 
+## One client, keepalive and reconnection
+The sonar accepts one controller at a time, so the **opensonar service is its only client**: the GUI,
+ROS 2 and any other program read the frames through the service.
+- Two threads run for as long as the service is connected, with or without subscribers or a GUI: one
+  receives and assembles frames (the last 30 are kept while nobody reads), the other sends `PING` every
+  second.
+- When the command connection drops, the driver reconnects every second and sends the starting
+  sequence again (frame receiver, date/time, the acoustic settings in use, salinity, focus). The service
+  `status` reports it in `warning` and in `link` (frames received, seconds since the last frame,
+  reconnections).
+- Before connecting, the driver listens to the beacon for up to 1.5 s; if it says the sonar is busy
+  (another program is connected), the connection is refused with a message saying so
+  (`check_busy=False` skips it).
+
 ## Network
 - The sonar gets its address by DHCP or, without a DHCP server, a link-local one (169.254.x.x): the
   PC must be on the same network (for a direct cable, a link-local address on the PC works).
-- The firewall must let in UDP 56124 (beacons) and the frame port (a random one chosen by the driver).
+- The firewall must let in UDP 56124 (beacons) and 56125 (frames); the .deb adds both rules when ufw
+  is active, and removes them on uninstall.
+- The `opensonar-net` profile has 169.254.10.10/16 besides 192.168.1.10/24, so the same cable and
+  profile serve both sonar families.
 - Only one controller at a time: a beacon with "busy" means another program is connected.
 - After a connection the sonar also sends its log to the PC by syslog (UDP 514); it is not used here.
 

@@ -22,6 +22,10 @@ class ApiError(OpenSonarError):
     pass
 
 
+class NoPing(ApiError):
+    """`Head.ping(timeout=…)` on a live sonar: nothing arrived in time."""
+
+
 def open(source=None, **options):  # noqa: A001 — opensonar.open is the public entry point
     """Opens a sonar.
 
@@ -101,11 +105,12 @@ class Head:
         self.sonar._adjust(self.index, "tvg", tvg)
 
     # --- pings ---
-    def ping(self, i=None):
-        """File: ping i (default: the next one, in sequence). Live: a new ping (i does not apply)."""
+    def ping(self, i=None, timeout=None):
+        """File: ping i (default: the next one, in sequence). Live: a new ping (i does not apply).
+        timeout (live sonars that stream frames): s to wait, then NoPing; None = wait for one."""
         if i is None:
             i = self._next
-        p = self.sonar._ping(self.index, i)
+        p = self.sonar._ping(self.index, i, timeout) if timeout is not None else self.sonar._ping(self.index, i)
         self._next = i + 1
         return p
 
@@ -258,7 +263,12 @@ class FrameHead(Head):
 
     model = property(lambda self: self._model)
     transducers = property(lambda self: [])
-    limits = property(lambda self: (float(self._first.ranges[0]), float(self._first.ranges[-1])))
+    @property
+    def limits(self):
+        """Live: what the sonar timing allows; file: the recorded window."""
+        if hasattr(self.sonar, "_limits"):
+            return self.sonar._limits()
+        return float(self._first.ranges[0]), float(self._first.ranges[-1])
     tvg = center_freq = property(lambda self: None)
     gain = property(lambda self: getattr(self.sonar, "gain", None))
     sound_speed = property(lambda self: self._first.sound_speed)
@@ -321,7 +331,9 @@ class LiveArisSonar(Sonar):
         super().__init__(host)
         self._net = aris_net.ArisNet(host, **options)
         r = self._net
-        first = r.frame()
+        if not r.serial:                   # without a beacon the serial comes in the frame headers
+            r.wait_first(2.0)
+        first = r.nominal_frame()          # geometry of the settings; frames may take a while (or never come)
         self.sonar_type, self.name, self.serial, self.firmware, self.fpga = "aris", r.model, r.serial, "", ""
         self.clock_offset = 0.0
         self.heads = [FrameHead(self, 0, r.model, first)]
@@ -331,12 +343,30 @@ class LiveArisSonar(Sonar):
     def gain(self):
         return self._net.settings["receiver_gain"]
 
+    @property
+    def warning(self):
+        """Last connection problem (dropped and reconnected…), or None."""
+        return self._net.warning
+
+    def link_status(self):
+        """Frames received, seconds since the last one, reconnections, warning."""
+        return self._net.link_status()
+
+    def drop_queued(self):
+        self._net.drop_queued()
+
+    def _limits(self):
+        return tuple(float(v) for v in self._net.limits())
+
     def _n_pings(self, head):
         return None
 
-    def _ping(self, head, i):
-        with self._lock:
-            return self._net.frame()
+    def _ping(self, head, i, timeout=None):
+        from .aris_net import NoFrame
+        try:
+            return self._net.frame(timeout)
+        except NoFrame as e:
+            raise NoPing(str(e)) from None
 
     def _adjust(self, head, what, value):
         with self._lock:

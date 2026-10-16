@@ -1,4 +1,8 @@
-"""The "opensonar-net" NetworkManager profile: a fixed IP on the wired card, in the sonar's subnet.
+"""The "opensonar-net" NetworkManager profile: fixed IPs on the wired card, in the sonars' subnets.
+
+Two addresses on the same card, so one cable serves both sonar families: 192.168.1.10/24 for the
+P900/M900 (factory IP 192.168.1.45) and 169.254.10.10/16 for the .aris family (link-local when no DHCP
+server answers). No gateway and no default route.
 
 The .deb creates it at install time (the only moment with a password) and installs a polkit rule, so
 activating it never asks for one. Without the .deb (AppImage, pip), `create()` makes a profile owned by
@@ -8,7 +12,8 @@ import shutil
 import subprocess
 
 PROFILE = "opensonar-net"
-ADDRESS = "192.168.1.10/24"            # the factory sonar IP is 192.168.1.45
+ADDRESSES = ("192.168.1.10/24", "169.254.10.10/16")
+ADDRESS = ",".join(ADDRESSES)
 SONAR_IP = "192.168.1.45"
 
 
@@ -41,7 +46,7 @@ def exists():
 
 
 def create(device=None, user=None):
-    """Creates the profile (manual IPv4 ADDRESS, no gateway or DNS, no IPv6, not autoconnecting).
+    """Creates the profile (manual IPv4 ADDRESSES, no gateway or DNS, no IPv6, not autoconnecting).
     user: make it private to that user (no root needed)."""
     if device is None:
         devs = wired_devices()

@@ -252,6 +252,9 @@ class Server:
         """Reads, records and queues every ping. Rendering happens in `_publish`, so it never slows the
         ping rate (or the recording) down."""
         previous = None
+        streaming = hasattr(self.sonar, "link_status")          # frames keep coming: wait in short steps
+        if streaming:
+            self.sonar.drop_queued()                            # not the ones from before `start`
         try:
             while self._running.is_set():
                 for h in heads:
@@ -261,7 +264,13 @@ class Server:
                     if head.n_pings is not None and head._next >= head.n_pings:
                         self._running.clear()                  # end of the file
                         break
-                    p = head.ping()
+                    if streaming:
+                        try:
+                            p = head.ping(timeout=0.5)
+                        except sdk.NoPing:
+                            continue
+                    else:
+                        p = head.ping()
                     if self.speed and not self.sonar.live:                     # file at recorded pace
                         if previous is not None:
                             time.sleep(max(0.0, min(p.timestamp - previous, 5.0)) / self.speed)
@@ -583,6 +592,7 @@ class Server:
                 rec = {"path": self.record_path, "pings": self.recorded, "marks": self.marks,
                        "formats": self.formats, "elapsed": time.time() - self.record_started,
                        "bytes": os.path.getsize(self.record_path) if os.path.isfile(self.record_path) else 0}
+        link = self.sonar.link_status() if hasattr(self.sonar, "link_status") else None
         playback = None
         if self.sonar is not None and not self.sonar.live:
             h = self.sonar.head((self.heads_on or [0])[0])
@@ -595,7 +605,10 @@ class Server:
                     "clock_offset": None if self.sonar is None else float(getattr(self.sonar, "clock_offset", 0.0)),
                     "published": self.published, "recording": self.record_path,
                     "recorded": self.recorded, "error": self.error,
-                    "rep_port": self.rep_port, "pub_port": self.pub_port}
+                    "rep_port": self.rep_port, "pub_port": self.pub_port,
+                    # live sonars that stream frames (.aris family): frames received since connecting,
+                    # seconds since the last one, reconnections, and the last connection warning
+                    "link": link, "warning": None if link is None else link["warning"]}
 
     def cmd_quit(self):
         self._quit.set()

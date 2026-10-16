@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 sys.path.insert(0, os.path.dirname(__file__))
 import opensonar  # noqa: E402
 from test_aris import write_aris  # noqa: E402
+from opensonar.aris_net import PING  # noqa: E402
 
 try:
     import zmq  # noqa: F401
@@ -95,7 +96,8 @@ class TestServiceAris(unittest.TestCase):
         while emu.tcp_port is None:
             time.sleep(0.01)
         try:
-            info = self.c.connect("127.0.0.1", family="aris", system_type=2, command_port=emu.tcp_port)
+            info = self.c.connect("127.0.0.1", family="aris", system_type=2, command_port=emu.tcp_port,
+                                  check_busy=False, frame_port=0)
             self.assertTrue(info["live"])
             self.c.range(0, 2.0, 8.0)
             self.c.gain(0, 10)
@@ -111,3 +113,48 @@ class TestServiceAris(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(zmq is not None, "no pyzmq")
+class TestServiceArisLink(unittest.TestCase):
+    """The service as the only client: keepalive without subscribers, reconnection reported in status."""
+
+    def setUp(self):
+        from aris_emulator import Emulator
+        self.dir = tempfile.TemporaryDirectory()
+        path = os.path.join(self.dir.name, "t.aris")
+        write_aris(path, [np.zeros((200, 48), np.uint8)] * 3, system_type=2)
+        self.emu = Emulator(path, frame_rate=20)
+        threading.Thread(target=self.emu.serve_tcp, args=(0, "127.0.0.1"), daemon=True).start()
+        while self.emu.tcp_port is None:
+            time.sleep(0.01)
+        self.srv = Server("127.0.0.1", 0, 0)
+        self.done = threading.Event()
+        self.thread = threading.Thread(target=self.srv.serve, args=(self.done,), daemon=True)
+        self.thread.start()
+        self.c = Client(f"tcp://127.0.0.1:{self.srv.rep_port}")
+
+    def tearDown(self):
+        self.c.disconnect()
+        self.c.close()
+        self.done.set()
+        self.thread.join(10)
+        self.emu.stop()
+        self.dir.cleanup()
+
+    def test_keepalive_and_reconnection(self):
+        self.c.connect("127.0.0.1", family="aris", system_type=2, command_port=self.emu.tcp_port,
+                       check_busy=False, frame_port=0)
+        time.sleep(2.5)                                        # not started, no subscriber, no GUI
+        st = self.c.status()
+        self.assertGreaterEqual(self.emu.commands.count(PING), 2)
+        self.assertGreater(st["link"]["frames"], 10)
+        self.assertIsNone(st["warning"])
+        self.emu.drop()
+        deadline = time.time() + 6
+        while time.time() < deadline and "reconnected" not in (self.c.status()["warning"] or ""):
+            time.sleep(0.1)
+        st = self.c.status()
+        self.assertIn("reconnected", st["warning"])
+        self.assertEqual(st["link"]["reconnects"], 1)
+        self.assertEqual(self.emu.clients, 2)

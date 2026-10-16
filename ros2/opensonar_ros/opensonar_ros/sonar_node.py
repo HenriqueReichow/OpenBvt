@@ -5,6 +5,7 @@ Per head N (topics under the node namespace, ~/headN/…):
     image     sensor_msgs/Image mono16      the XY fan (row 0 = farthest), best effort
     raw       opensonar_msgs/RawPing          raw signal + compact configuration, reliable (P900/M900)
     frame     opensonar_msgs/BeamFrame        intensities on a range × beam grid, reliable (.aris family)
+    sim_imaging_sonar  (optional) the ping in a simulator's imaging-sonar message (sim_imaging_sonar.py)
     info      opensonar_msgs/SonarInfo        head description, transient_local, on connect and on changes
 and ~/status (opensonar_msgs/SonarStatus), ~/events (opensonar_msgs/EventMark), /diagnostics.
 header.stamp is the ping's UTC time, corrected for the sonar clock (docs/SYNC.md).
@@ -24,6 +25,7 @@ from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPo
 from sensor_msgs.msg import Image
 from std_msgs.msg import Header
 
+from . import sim_imaging_sonar as sim
 from .protocol import Commands, ServiceError, Subscription, start_service
 
 def stamp_of(t):
@@ -109,6 +111,7 @@ class SonarNode(Node):
         p("publish_raw", True)
         p("publish_info", True)
         p("publish_diagnostics", True)
+        p("sim_imaging_sonar_type", "")       # "<package>/msg/<Type>" of the simulator's message; "" = off
         p("image_qos_depth", 5)
         p("raw_qos_depth", 200)
         g = lambda name: self.get_parameter(name).value          # noqa: E731
@@ -158,6 +161,12 @@ class SonarNode(Node):
         self.status_pub = self.create_publisher(SonarStatus, "~/status", 10)
         self.events_pub = self.create_publisher(EventMark, "~/events", QoSProfile(depth=50))
         self.diag_pub = self.create_publisher(DiagnosticArray, "/diagnostics", 10) if self.want["diagnostics"] else None
+        self.sim_type = sim.load_type(g("sim_imaging_sonar_type"))
+        if g("sim_imaging_sonar_type") and self.sim_type is None:
+            self.get_logger().warn(f"message type {g('sim_imaging_sonar_type')} is not installed: "
+                                   "running without ~/headN/sim_imaging_sonar")
+        for h in self.heads if self.sim_type is not None else ():
+            self.pubs[("sim", h)] = self.create_publisher(self.sim_type, f"~/head{h}/sim_imaging_sonar", reliable)
         # connect and start
         self.received, self.lost, self._last_seq = 0, 0, None
         self.rates = {h: [] for h in self.heads}
@@ -175,7 +184,8 @@ class SonarNode(Node):
         else:
             for h in self.heads:
                 self.pubs.pop(("frame", h), None)
-        kinds = (["xy"] if self.want["image"] else []) + (["rtheta"] if self.frames and self.want["raw"] else [])
+        wants_rtheta = (self.frames and self.want["raw"]) or self.sim_type is not None
+        kinds = (["xy"] if self.want["image"] else []) + (["rtheta"] if wants_rtheta else [])
         speed = None if self.info["live"] or g("replay_speed") <= 0 else float(g("replay_speed"))
         self.cmd.call("start", heads=self.heads, image=kinds or False, smooth=bool(g("smooth")), speed=speed)
         self._stop = threading.Event()
@@ -258,6 +268,9 @@ class SonarNode(Node):
             self.pubs[("raw", h)].publish(raw_msg(ping, header, self.config.get(h)))
         if ("frame", h) in self.pubs and "rtheta" in ping.images:
             self.pubs[("frame", h)].publish(frame_msg(ping, header, self.config.get(h, {})))
+        if ("sim", h) in self.pubs and "rtheta" in ping.images:
+            full_scale = 255.0 if self.frames else 65535.0     # u8 frames, u16 images of the raw-signal sonars
+            self.pubs[("sim", h)].publish(sim.fill(self.sim_type(), header, ping.images["rtheta"][0], full_scale))
         if ("image", h) in self.pubs and "xy" in ping.images:
             self.pubs[("image", h)].publish(image_msg(ping.images["xy"][0], header))
         key = (round(m["range_start"], 3), round(m["range_stop"], 3), m.get("gain"), m.get("tvg"),

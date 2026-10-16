@@ -30,7 +30,8 @@ def test_setup_creates_a_user_profile_once_and_activates_it(monkeypatch):
     add = next(c for c in nm.calls if c[:2] == ("connection", "add"))
     opts = dict(zip(add[2::2], add[3::2]))
     assert opts["con-name"] == "opensonar-net" and opts["ifname"] == "enp4s0"           # the wired card
-    assert opts["ipv4.addresses"] == "192.168.1.10/24" and opts["ipv4.method"] == "manual"
+    assert opts["ipv4.addresses"] == "192.168.1.10/24,169.254.10.10/16" and opts["ipv4.method"] == "manual"
+    assert "ipv4.gateway" not in opts
     assert opts["ipv4.never-default"] == "yes" and opts["connection.autoconnect"] == "no"
     assert opts["connection.permissions"] == "user:lh"
     assert ("connection", "up", "opensonar-net") in nm.calls

@@ -6,6 +6,10 @@ case "$1" in
         if command -v nmcli >/dev/null 2>&1 && nmcli -t general status >/dev/null 2>&1; then
             nmcli connection delete opensonar-net >/dev/null 2>&1 || true
         fi
+        if command -v ufw >/dev/null 2>&1; then          # the rules postinst added (no-op if absent)
+            ufw delete allow 56124/udp >/dev/null 2>&1 || true
+            ufw delete allow 56125/udp >/dev/null 2>&1 || true
+        fi
         rm -rf /opt/opensonar
         if [ -d /run/systemd/system ]; then
             systemctl daemon-reload >/dev/null 2>&1 || true

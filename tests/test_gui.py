@@ -424,3 +424,29 @@ def test_aris_live_by_ip_and_family(qtbot, window):
             w.disconnect()
         finally:
             emu.stop()
+
+
+def test_aris_no_frames_warning_and_busy_in_discovery(qtbot, window):
+    from aris_emulator import Emulator
+    from opensonar.aris_net import BEACON_PORT
+    from opensonar.gui import NO_FRAMES
+    w = window
+    with tempfile.TemporaryDirectory() as d:
+        emu = Emulator(_aris_file(d), send_frames=False)       # takes the settings, sends nothing
+        threading.Thread(target=emu.serve_tcp, args=(0, "127.0.0.1"), daemon=True).start()
+        while emu.tcp_port is None:
+            time.sleep(0.01)
+        try:
+            assert w.connect_to("127.0.0.1", family="aris", system_type=2, command_port=emu.tcp_port,
+                                check_busy=False, frame_port=0)
+            qtbot.waitUntil(lambda: w.status_link.text() == NO_FRAMES, timeout=9000)
+            # discovery shows that the sonar is now taken (by us)
+            threading.Thread(target=emu.serve_beacons, args=("127.0.0.1", BEACON_PORT, 0.2), daemon=True).start()
+            w.btn_discover.click()
+            rows = [[w.found.item(r, k).text() for k in range(4)] for r in range(w.found.rowCount())]
+            mine = [r for r in rows if r[2] == "127.0.0.1" and r[1] == "42"]
+            assert mine and mine[0][3].startswith("busy")
+            w.disconnect()
+            assert w.status_link.text() == ""
+        finally:
+            emu.stop()

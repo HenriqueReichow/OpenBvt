@@ -1,7 +1,9 @@
 """Emulated sonar for the .aris live protocol (docs/ARIS_LIVE.md): replays the frames of a .aris file.
 
 - Beacons: availability every second to UDP `beacon_port` at `beacon_host`.
-- Commands: TCP; the settings received are kept in `settings` (they do not change the replayed data).
+- Commands: TCP, one client at a time (like the real sonar: a second one is closed at once, and the
+  beacon says "busy" while a client is connected); the settings received are kept in `settings`
+  (they do not change the replayed data). `drop()` closes the current client, to test reconnection.
 - Frames: once a receiver port and the acoustic settings are known, the file frames (looping) are sent
   to it in parts, with the samples unordered as a real sonar sends them. It stops when no command
   (keepalive) arrives for `silence` s.
@@ -25,17 +27,20 @@ PART_SIZE = 1400                             # samples per frame part (fits a 15
 
 
 class Emulator:
-    def __init__(self, path, verbose=False, silence=3.0, frame_rate=None):
+    def __init__(self, path, verbose=False, silence=3.0, frame_rate=None, send_frames=True):
         self.file = aris.ArisFile(path)
         h = self.file.first
         self.system_type, self.serial = h["system_type"], h["serial"]
         self.verbose, self.silence, self.frame_rate = verbose, silence, frame_rate
+        self.send_frames = send_frames       # False: accepts everything but never streams (refused settings)
         self.settings, self.commands = {}, []
         self.receiver = None
         self.tcp_port = None
-        self.sent = 0
+        self.sent = self.clients = self.refused = 0
         self._last_command = 0.0
         self._stop = threading.Event()
+        self._conn = None                    # the connected client
+        self._conn_lock = threading.Lock()
 
     def log(self, *a):
         if self.verbose:
@@ -51,15 +56,41 @@ class Emulator:
                 conn, addr = srv.accept()
             except socket.timeout:
                 continue
+            with self._conn_lock:
+                busy = self._conn is not None
+                if not busy:
+                    self._conn = conn
+                    self.clients += 1
+            if busy:                                           # only one controller at a time
+                self.log("refused", addr)
+                self.refused += 1
+                conn.close()
+                continue
             self.log("client", addr)
             threading.Thread(target=self._client, args=(conn, addr), daemon=True).start()
         srv.close()
+
+    @property
+    def busy(self):
+        return self._conn is not None
+
+    def drop(self):
+        """Closes the connection of the current client (the sonar going away for a moment)."""
+        with self._conn_lock:
+            conn, self._conn = self._conn, None
+        if conn is not None:
+            try:
+                conn.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            conn.close()
 
     def _client(self, conn, addr):
         conn.settimeout(0.5)
         buf = b""
         stream = None
-        while not self._stop.is_set():
+        self.receiver, self.settings = None, {}
+        while not self._stop.is_set() and self._conn is conn:
             try:
                 chunk = conn.recv(4096)
             except socket.timeout:
@@ -73,9 +104,12 @@ class Emulator:
                 n = struct.unpack(">I", buf[:4])[0]
                 self._command(decode(buf[4:4 + n]), addr)
                 buf = buf[4 + n:]
-                if stream is None and self.receiver and self.settings:
-                    stream = threading.Thread(target=self._stream, daemon=True)
+                if stream is None and self.receiver and self.settings and self.send_frames:
+                    stream = threading.Thread(target=self._stream, args=(conn,), daemon=True)
                     stream.start()
+        with self._conn_lock:
+            if self._conn is conn:
+                self._conn = None
         conn.close()
 
     def _command(self, msg, addr):
@@ -97,11 +131,11 @@ class Emulator:
             self.log("command", kind)
 
     # --- frames ---
-    def _stream(self):
+    def _stream(self, conn):
         out = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         rate = self.frame_rate or self.settings.get("frame_rate") or 10.0
-        i = 0
-        while not self._stop.is_set() and time.time() - self._last_command < self.silence:
+        i = self.sent
+        while not self._stop.is_set() and self._conn is conn and time.time() - self._last_command < self.silence:
             self._send_frame(out, i % self.file.n_frames, i + 1)
             i += 1
             time.sleep(1.0 / rate)
@@ -132,7 +166,7 @@ class Emulator:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         while not self._stop.is_set():
-            busy = int(self.receiver is not None)
+            busy = int(self.busy)
             s.sendto(encode([(1, self.serial), (2, self.system_type), (4, busy)]), (host, port))
             self._stop.wait(period)
         s.close()

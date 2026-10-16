@@ -99,7 +99,7 @@ sudo apt install ./dist/opensonar_4.1.0_amd64.deb
 ./dist/opensonar-4.1.0-x86_64.AppImage             # or the AppImage
 ```
 Python and every dependency are bundled. The .deb also creates the **opensonar-net** network profile
-(192.168.1.10/24 on the wired card), so the GUI's **Configure sonar network** button sets up the
+(192.168.1.10/24 + 169.254.10.10/16 on the wired card), so the GUI's **Configure sonar network** button sets up the
 network with one click and no password. Details, the service, uninstalling and building the packages:
 [`docs/INSTALL.md`](docs/INSTALL.md).
 

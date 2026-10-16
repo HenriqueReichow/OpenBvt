@@ -58,8 +58,9 @@ class TestLive(unittest.TestCase):
         self.emu.stop()
         self.dir.cleanup()
 
-    def open(self):
-        return opensonar.open("127.0.0.1", family="aris", system_type=2, command_port=self.emu.tcp_port)
+    def open(self, **kw):
+        kw = dict(dict(system_type=2, check_busy=False, frame_port=0), **kw)
+        return opensonar.open("127.0.0.1", family="aris", command_port=self.emu.tcp_port, **kw)
 
     def test_frames_arrive_ordered(self):
         with self.open() as s:
@@ -106,6 +107,52 @@ class TestLive(unittest.TestCase):
             s.heads[0].ping()
             time.sleep(1.3)
         self.assertIn(aris_net.PING, self.emu.commands)
+
+    def test_keepalive_without_reading_frames(self):
+        with self.open() as s:
+            time.sleep(2.5)                                    # nobody reads: PING and reception go on
+            pings = self.emu.commands.count(aris_net.PING)
+            status = s.link_status()
+        self.assertGreaterEqual(pings, 2)
+        self.assertGreater(status["frames"], 10)
+        self.assertLess(status["since_last_frame"], 1.0)
+
+    def test_reconnects_after_a_drop(self):
+        with self.open() as s:
+            h = s.heads[0]
+            h.adjust_gain(9)
+            h.ping(timeout=5)
+            self.emu.drop()                                    # the sonar closes the command stream
+            deadline = time.time() + 6
+            while self.emu.clients < 2 and time.time() < deadline:
+                time.sleep(0.05)
+            self.assertEqual(self.emu.clients, 2)
+            s.drop_queued()
+            f = h.ping(timeout=5)                              # frames flow again
+            self.assertIsNotNone(f)
+            self.assertIn("reconnected", s.warning)
+            self.assertEqual(s.link_status()["reconnects"], 1)
+        # the starting sequence was sent again, with the settings in use (gain 9, a newer cookie)
+        self.assertEqual(self.emu.commands.count(aris_net.SET_FRAMESTREAM_RECEIVER), 2)
+        self.assertEqual(self.emu.settings["receiver_gain"], 9.0)
+        self.assertEqual(self.emu.settings["cookie"], 3)
+
+    def test_ping_timeout(self):
+        with self.open() as s:
+            self.emu.stop()                                    # no more frames
+            time.sleep(0.3)
+            s.drop_queued()
+            with self.assertRaises(opensonar.NoPing):
+                s.heads[0].ping(timeout=0.5)
+
+    def test_busy_sonar_is_refused(self):
+        port = _free_udp_port()
+        threading.Thread(target=self.emu.serve_beacons, args=("127.0.0.1", port, 0.1), daemon=True).start()
+        with self.open(beacon_port=port, check_busy=True):    # free: connects, and the sonar is now busy
+            with self.assertRaises(aris_net.ArisNetError) as e:
+                self.open(beacon_port=port, check_busy=True)
+            self.assertIn("busy", str(e.exception))
+        self.assertEqual(self.emu.refused, 0)                  # refused by us, before connecting
 
     def test_beacon_discovery(self):
         port = _free_udp_port()

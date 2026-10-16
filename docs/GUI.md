@@ -40,7 +40,7 @@ opensonar gui
 ## Before you start: the network
 The sonar has a fixed IP (factory default 192.168.1.45), so the PC's wired card must be in the same
 subnet. Press **Configure sonar network** (top of the Connection box). It activates the
-NetworkManager profile **opensonar-net** (192.168.1.10/24 on the wired card) without a password, and
+NetworkManager profile **opensonar-net** (192.168.1.10/24 + 169.254.10.10/16 on the wired card) without a password, and
 checks that the sonar answers. The .deb creates the profile at install time; the AppImage or a pip
 install create it, for your user, the first time you press the button ([`INSTALL.md`](INSTALL.md)).
 The sonar answers about 40 s after power-on.
@@ -56,9 +56,10 @@ The sonar answers about 40 s after power-on.
 | Control | What it does |
 |---|---|
 | **Configure sonar network** | activates the opensonar-net profile and pings the sonar (see above) |
-| **Discover sonars** | multicast discovery (2 s). For each sonar found, the service connects briefly and fills in **Model**, **Serial** and **IP**. A sonar that is already connected keeps its connection. |
+| **Discover sonars** | multicast discovery (2 s), plus the beacons of the `.aris` family. For each sonar found, the list shows **Model**, **Serial**, **IP** and **State**: *free*, or *busy (another program)* when the beacon says another client has it (only one at a time). A sonar that is already connected keeps its connection. |
 | **Connect to selected** / double click | connects to the selected row |
 | IP field + type + **Connect** | connects to `ip` or `ip:port` (an emulator on another port, for example). The type selects the protocol: **P900 / M900** or **.aris sonar** (discovery fills it in). The last IP and type are remembered. |
+| Status bar (`.aris` family) | *Connected, but no frames: the sonar may have refused the settings* when no frame arrived ~5 s after connecting; the reconnection notice when the connection dropped and came back. |
 | **Open recording…** | opens a `.son` or `.aris` recording on this PC. **Start** plays it at the recorded pace, once. |
 | **Disconnect** | stops pinging and closes the connection |
 

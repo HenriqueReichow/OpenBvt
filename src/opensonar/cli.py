@@ -199,7 +199,7 @@ def main(argv=None):
     sv.add_argument("--image", action="store_true", help="also publish the XY image (u16) of every ping")
     sv.add_argument("--record", metavar="FILE.son", help="record every ping from the start (with SOURCE)")
     sub.add_parser("gui", help="graphical interface (starts the service by itself if needed)")
-    sub.add_parser("network", help="activate the opensonar-net network profile (192.168.1.10/24 on the wired card)")
+    sub.add_parser("network", help="activate the opensonar-net network profile (192.168.1.10/24 + 169.254.10.10/16 on the wired card)")
     ct = sub.add_parser("ctl", help="send one command to the service", epilog=CTL_USAGE,
                         formatter_class=argparse.RawDescriptionHelpFormatter)
     ct.add_argument("--address", default="tcp://127.0.0.1:4545", help="service command address")

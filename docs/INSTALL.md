@@ -33,7 +33,8 @@ This is the **only step that asks for a password**. It installs:
 | opensonar with its own Python | `/opt/opensonar` |
 | the `opensonar` command (`opensonar gui`, `server`, `ctl`, `export`, `live`, `discover`, `network`) | `/usr/bin/opensonar` |
 | menu entry "opensonar" and icon | `/usr/share/applications/opensonar.desktop`, `/usr/share/icons/hicolor/*/apps/opensonar.*` |
-| network profile **opensonar-net** (192.168.1.10/24 on the first wired card, no gateway, no IPv6, not automatic) | NetworkManager, created by the installer |
+| network profile **opensonar-net** (192.168.1.10/24 for the P900/M900 and 169.254.10.10/16 for the `.aris` family, on the first wired card; no gateway, no default route, no IPv6, not automatic; an existing profile gets the second address on upgrade) | NetworkManager, created by the installer |
+| ufw rules for UDP 56124 (`.aris` beacons) and 56125 (`.aris` frames), only if ufw is active; removed on uninstall | ufw |
 | polkit rule, so the profile can be turned on without a password | `/usr/share/polkit-1/rules.d/50-opensonar.rules` (24.04), `/var/lib/polkit-1/localauthority/10-vendor.d/50-opensonar.pkla` (22.04) |
 | optional service `opensonar-server.service`, **off by default** | `/lib/systemd/system/`, settings in `/etc/default/opensonar-server` |
 | documentation | `/usr/share/doc/opensonar/` |
