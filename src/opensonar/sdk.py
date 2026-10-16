@@ -13,6 +13,7 @@ import os
 import threading
 import time
 
+from . import frame as _frame
 from . import image as _image
 from .son import OpenSonarError, SonFile
 
@@ -36,8 +37,11 @@ def open(source=None, **options):  # noqa: A001 — opensonar.open is the public
         a = found[0]
         source = f"{a['Host']}:{a.get('Port', 1149)}"
     source = os.fspath(source)
-    if os.path.exists(source) or source.lower().endswith(".son"):
-        return FileSonar(source)
+    ext = os.path.splitext(source)[1].lower()
+    if ext in FILE_FORMATS:
+        return FILE_FORMATS[ext](source)
+    if os.path.exists(source):
+        raise ApiError(f"unknown file format: {ext or source!r} (known: {', '.join(sorted(FILE_FORMATS))})")
     return LiveSonar(source, **options)
 
 
@@ -134,6 +138,11 @@ class Head:
         if kind == "xy":
             return render(self.config, ping, smooth, crop)
         return render(self.config, ping, smooth)
+
+    def frame(self, ping):
+        """The ping as a common `opensonar.frame.Frame` (intensities on a range × beam angle grid)."""
+        img, geo = _image.rtheta(self.config, ping)
+        return _frame.from_rtheta(ping, img, geo, self.sound_speed)
 
     def __repr__(self):
         lo, hi = self.limits
@@ -234,6 +243,10 @@ class LiveSonar(Sonar):
 
     def close(self):
         self._net.close()
+
+
+# file extension → Sonar class; each sonar family registers its recording format here
+FILE_FORMATS = {".son": FileSonar}
 
 
 class Stream:

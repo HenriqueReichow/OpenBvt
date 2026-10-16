@@ -160,3 +160,37 @@ class TestDiscovery(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(os.path.exists(FILE), "no samples/exp1.son")
+class TestFrame(unittest.TestCase):
+    def test_frame_matches_rtheta(self):
+        with opensonar.open(FILE) as s:
+            h = s.heads[0]
+            p = h.ping(0)
+            f = h.frame(p)
+            img, geo = h.image(p, "rtheta")
+        self.assertIsInstance(f, opensonar.Frame)
+        self.assertEqual(f.intensity.shape, (geo["rows"], geo["cols"]))
+        self.assertEqual((f.n_samples, f.n_beams), img.shape)
+        np.testing.assert_array_equal(f.intensity, img[::-1])
+        self.assertTrue(np.all(np.diff(f.ranges) > 0))
+        self.assertTrue(np.all(np.diff(f.beam_angles) > 0))
+        self.assertEqual(f.number, p.number)
+
+    def test_to_xy_puts_echoes_where_they_are(self):
+        from opensonar.frame import to_xy
+        with opensonar.open(FILE) as s:
+            f = s.heads[0].frame(s.heads[0].ping(0))
+        out, geo = to_xy(f)
+        k = np.unravel_index(np.argmax(f.intensity), f.intensity.shape)
+        r, th = f.ranges[k[0]], f.beam_angles[k[1]]
+        row = geo["origin_row"] - int(np.rint(r * np.cos(th) / geo["res"]))
+        col = geo["origin_col"] + int(np.rint(r * np.sin(th) / geo["res"]))
+        self.assertEqual(out[row, col], f.intensity[k])
+
+
+class TestFileFormats(unittest.TestCase):
+    def test_unknown_extension(self):
+        with self.assertRaises(ApiError):
+            opensonar.open(__file__)
