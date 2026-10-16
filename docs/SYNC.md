@@ -24,6 +24,15 @@ Checked with the real sonar (clock in 1970: `.son` and `index.csv` at 2026-10-14
 `tests/test_server.py::test_utc_is_corrected_when_the_sonar_clock_is_in_1970` (emulated sonar with the
 same offset: `.son`, `index.csv` and `.events.csv`).
 
+**`.aris` and `.ddf`:**
+- A live `.aris` sonar gets the PC time at connection (`SET_DATETIME`, local time, as its protocol asks)
+  and stamps each frame with its clock in µs; that is the frame time used, without an offset
+  measurement. Whether its clock counts UTC or local time has not been checked on a real sonar: compare
+  a frame time with the PC clock on the first test.
+- `.aris` files: the sonar time of each frame (or the PC time recorded with it when that is zero).
+- `.ddf` files: UTC from the whole-second Unix time of each frame, with the hundredths of the local time
+  fields; the time zone is their difference rounded to 15 min (`DDF_FORMAT.md`).
+
 **Limits:**
 - The offset is measured **once per connection**. If the sonar clock drifts against the PC during a
   long session, the error grows with it (a typical crystal drifts 10–50 ppm, so 0.04–0.2 s per hour).

@@ -103,7 +103,7 @@ def head_info(head):
     angles = [float(a) for a in head._first.beam_angles]
     out = {"model": head.model, "family": head.sonar.sonar_type, "sound_speed": float(head.sound_speed),
            "range_min": float(lo), "range_max": float(hi), "beams": len(angles), "beam_angles": angles,
-           "transducers": []}
+           "vertical_fov": float(head._first.vertical_fov or 0.0), "transducers": []}
     out["config_id"] = hashlib.sha1(json.dumps(out, sort_keys=True).encode()).hexdigest()[:16]
     return out
 

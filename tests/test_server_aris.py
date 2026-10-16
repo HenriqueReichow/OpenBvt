@@ -65,6 +65,7 @@ class TestServiceAris(unittest.TestCase):
         self.assertEqual((h["model"], h["n_pings"], h["transducers"]), ("1200", 6, 0))
         cfg = self.c.config()[0]
         self.assertEqual((cfg["family"], cfg["beams"]), ("aris", 48))
+        self.assertEqual(cfg["vertical_fov"], 0.0)                          # not known for .aris
         # played as fast as possible: only the newest frame of each batch is rendered
         m = next(m for m in reversed(self._receive(6)) if m.meta["images"])
         self.assertIsNone(self.c.status()["error"])

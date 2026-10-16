@@ -76,7 +76,7 @@ def frame_msg(ping, header, cfg):
                      seq=int(m["seq"]), sound_speed=float(m.get("sound_speed") or 0.0),
                      gain=float(m.get("gain") or 0.0), samples=int(img.shape[0]), beams=int(img.shape[1]),
                      range_start=float(m["range_start"]), range_resolution=float(m.get("res") or 0.0),
-                     beam_angles=angles.tolist(), vertical_fov=0.0,
+                     beam_angles=angles.tolist(), vertical_fov=float(cfg.get("vertical_fov") or 0.0),
                      intensity=array("B", np.ascontiguousarray(img, np.uint8).tobytes()))
 
 

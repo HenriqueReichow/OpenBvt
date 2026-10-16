@@ -82,3 +82,16 @@ In the window: space pauses, ↑/↓ change the range (±20 %), `c` colours, `l`
 - `error: cannot connect to the sonar at …`: network, PoE, or the sonar is still booting.
 - `expected <Sonar>` or `head N without <Pulse>`: keep the capture and the message.
 - Noise only: face out of the water, no target in range, or low gain.
+
+## `.aris` sonar — checklist for the first real test
+The driver was only run against `tools/aris_emulator.py` (`docs/ARIS_LIVE.md`). On the first real sonar:
+1. Network: the `opensonar-net` profile (169.254.10.10/16) or DHCP; `opensonar discover` (or **Discover
+   sonars**) must list it as *free*. If it is *busy*, close the other program.
+2. Connect from the GUI (type **.aris sonar**). Without frames after ~5 s the status bar says so: the
+   settings were probably refused (check `aris_net.DEFAULTS` for that model).
+3. Range and gain: the window in the frames must follow `adjust_range` (`window()` vs the frame ranges).
+4. Orientation: a target on the right of the sonar must appear on the right of the fan (beam 0 = right-most).
+5. Time: compare the frame time with the PC clock (`docs/SYNC.md`).
+6. Unplug the cable for a few seconds: the status bar must report the reconnection, and frames must
+   come back without restarting anything.
+7. Capture the traffic (`tools/capture_net.sh`) to keep a reference of the real protocol.

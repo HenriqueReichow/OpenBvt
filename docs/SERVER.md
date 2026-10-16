@@ -40,9 +40,9 @@ A REQ socket must receive the reply before sending the next request.
 |---|---|---|
 | `status` | — | `version`, `connected`, `source`, `serial`, `running`, `heads` (being pinged), `image`, `smooth`, `speed`, `clock_offset` (sonar − local clock, s), `published`, `recording` (path or null), `recorded`, `record` (null, or `{path, pings, marks, elapsed (s), bytes}`), `playback` (files: `{position, n_pings}`, position = next ping), `error` (last acquisition error or null), `link` (`.aris` family: `{frames, since_last_frame, reconnects, connected_for, warning, frame_port}`, else null), `warning` (last connection notice, e.g. a reconnection, or null), `rep_port`, `pub_port` |
 | `discover` | `timeout` (s, default 2), `probe` (default true) | `sonars`: list of the discovery answers (`Host`, `Port`, `UUID`, `MulticastIP`, …); with `probe`, the service connects briefly to each one and adds `Model`, `Serial` and `Heads` (or `ProbeError`). Sonars of the `.aris` family are listed from their beacons, with `Family: "aris"`, `Model`, `Serial`, `SystemType` and `Busy` |
-| `connect` | `source`: `"ip"`, `"ip:port"`, path of a `.son` or `.aris` (path on the **server**), or null (first sonar found by discovery); optional `timeout`, `sync_clock`; `family: "aris"` (+ `system_type`) for a live sonar of that family ([`ARIS_LIVE.md`](ARIS_LIVE.md)) | the same as `heads` |
+| `connect` | `source`: `"ip"`, `"ip:port"`, path of a `.son`, `.aris` or `.ddf` (path on the **server**), or null (first sonar found by discovery); optional `timeout`, `sync_clock`; `family: "aris"` (+ `system_type`, `frame_port`, `check_busy`) for a live sonar of that family ([`ARIS_LIVE.md`](ARIS_LIVE.md)); `sound_speed` (m/s) for a `.ddf` | the same as `heads` |
 | `disconnect` | — | — (also stops acquisition and closes any recording) |
-| `config` | `head` (optional) | `heads`: the full configuration of each head, enough to rebuild the images from the raw signal (`opensonar.son.config_from_dict`): `model`, `center_freq`, `sound_speed`, `range_min/max`, `sample_rate`, `pulse_sample_rate`, `element_spacing`, `mapping_method`, `transducers` (index, high/low frequency, flags, position, rotation, oriented), `pulse` (chirp replica, base64 complex64 LE), `normalization` (base64 float32 LE), `beams`, `beam_angles` (rad, positive to the right), `config_id` |
+| `config` | `head` (optional) | `heads`: the full configuration of each head, enough to rebuild the images from the raw signal (`opensonar.son.config_from_dict`): `model`, `center_freq`, `sound_speed`, `range_min/max`, `sample_rate`, `pulse_sample_rate`, `element_spacing`, `mapping_method`, `transducers` (index, high/low frequency, flags, position, rotation, oriented), `pulse` (chirp replica, base64 complex64 LE), `normalization` (base64 float32 LE), `beams`, `beam_angles` (rad, positive to the right), `config_id`. For heads that hand out frames (`.aris`, `.ddf`): `model`, `family`, `sound_speed`, `range_min/max`, `beams`, `beam_angles`, `vertical_fov` (rad, 0 = unknown), `config_id` only |
 | `heads` | — | `source`, `live`, `model`, `serial`, `firmware`, `sonar_type`, `heads`: list of `{index, model, limits: [min, max] m, transducers, gain, tvg, center_freq, n_pings}` (`n_pings` is null when live) |
 | `range` | `head`, `start` (m, null = minimum), `stop` (m) | — (values clamped to the head limits) |
 | `gain` | `head`, `value` | — |
@@ -53,14 +53,19 @@ A REQ socket must receive the reply before sending the next request.
 | `mark` | `text` | `mark` (`utc`, `timestamp`, `text`, `seq`, `recorded_pings`), `file` — event mark: published on `event/<serial>` and, while recording, appended to `<recording>.events.csv` |
 | `image` | `enabled`, `smooth` | — (changes the published image while running) |
 | `stop` | — | — |
-| `record` | `path` (on the server; `.son` optional), `formats`: any of `son` (default), `npy`, `npz`, `png`, `tiff` | `path`, `formats` — `son` writes `<path>.son`; each image format writes every ping's XY image (rendered in a child process, none skipped) to `<path>_<fmt>/h<head>/ping_NNNNNN.<ext>` plus `index.csv` (file, number, utc, timestamp, tz_offset, range_start, range_stop, kind, rows, cols, res, origin_row, origin_col) |
+| `record` | `path` (on the server; extension optional), `formats`: any of `son` (default; the raw recording: `.son`, or `.aris` for that family; not available for a `.ddf` source), `npy`, `npz`, `png`, `tiff` | `path`, `formats` — `son` writes `<path>.son`; each image format writes every ping's XY image (rendered in a child process, none skipped) to `<path>_<fmt>/h<head>/ping_NNNNNN.<ext>` plus `index.csv` (file, number, utc, timestamp, tz_offset, range_start, range_stop, kind, rows, cols, res, origin_row, origin_col) |
 | `stop_record` | — | `path`, `pings` (number recorded), `bytes`, `marks`, `events` (CSV path or null), `formats`, `images` (pings written as images), `error` — waits until the queued images are written |
 | `quit` | — | — (the service exits) |
 
-- `range`, `gain` and `tvg` only work live. On a file they return an error.
+- `range`, `gain` and `tvg` only work live. On a file they return an error; `.aris` sonars have no `tvg`.
+- Pings of the `.aris` and `.ddf` families are frames: their message has no signal parts (`signals` and
+  `signals_q` are empty), and `bins`, `beams`, `res`, `bin_near`, `bin_far` describe the frame grid.
+  Ask for the `rtheta` image to get the intensities themselves.
+- A `.aris` sonar takes one client: the service is it. It keeps the connection alive (PING every second)
+  whether or not anyone is subscribed, reconnects by itself and reports it in `status`.
 - `start` pings the listed heads in turn (round robin), one ping per request. With a file, it plays the pings in sequence once and then stops (`running` becomes false).
 - **Recording lives in the service.** Each ping is written to the `.son` in the acquisition thread
-  before it is published. Recording does not depend on any client being connected, and a slow or
+  before it is published (`.son`, or `.aris` for that family). Recording does not depend on any client being connected, and a slow or
   closed client never causes a gap. The file is rev 14
   (`docs/SON_FORMAT.md` §10). `record` can start before or after `start`. `stop_record`,
   `disconnect` and `quit` close the file (index included).

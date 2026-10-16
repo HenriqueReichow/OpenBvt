@@ -7,7 +7,8 @@ configuration and pings, a ping that becomes an image) are the same for the thre
 ```python
 import opensonar
 
-with opensonar.open("192.168.1.45") as s:        # or "recording.son", or "ip:port", or None (discovery)
+with opensonar.open("192.168.1.45") as s:        # or "recording.son" / ".aris" / ".ddf", "ip:port", None (discovery),
+                                                 # or ("ip", family="aris")
     print(s)                                    # <Sonar live 192.168.1.45: …, serial …, 6 head(s)>
     head = s.head(3)
     head.adjust_range(1.0, 20.0)                # live; on a file → ApiError
@@ -25,7 +26,7 @@ with opensonar.open("192.168.1.45") as s:        # or "recording.son", or "ip:po
 | any other existing file | `ApiError` (unknown format) |
 | `"ip"` or `"ip:port"` | `LiveSonar` through the native driver (`opensonar.net`); default port 1149 |
 | `None` | multicast discovery; opens the first sonar that answers |
-| `"ip"` or `None` with `family="aris"` | `LiveArisSonar` (`opensonar.aris_net`, [`ARIS_LIVE.md`](ARIS_LIVE.md)); `None` = first beacon heard. Options: `system_type` (0, 1, 2; default: from the beacon), `timeout`, `command_port`, `beacon_port`, `frame_ip`. `adjust_range` and `adjust_gain` work; `adjust_tvg` → `ApiError` |
+| `"ip"` or `None` with `family="aris"` | `LiveArisSonar` (`opensonar.aris_net`, [`ARIS_LIVE.md`](ARIS_LIVE.md)); `None` = first beacon heard. Options: `system_type` (0, 1, 2; default: from the beacon), `timeout`, `command_port`, `beacon_port`, `frame_ip`, `frame_port` (UDP for the frames, default 56125; 0 = any), `check_busy` (default `True`: listen to the beacon first and refuse a sonar another program has). `adjust_range` and `adjust_gain` work; `adjust_tvg` → `ApiError` |
 
 Live options: `timeout` (s per request, default 10), `sync_clock` (default `True`),
 `discovery_timeout` (s, with `source=None`).
@@ -39,6 +40,7 @@ Live options: `timeout` (s per request, default 10), `sync_clock` (default `True
 | `heads`, `head(i)` | list of `Head`; `head(i)` checks the index | same |
 | `clock_offset` | 0 | sonar clock − local clock (s), already removed from the ping times |
 | `close()`, `with` | — | closes the TCP connection |
+| `warning`, `link_status()`, `drop_queued()` | — | `.aris` family only: last connection notice (e.g. reconnected), `{frames, since_last_frame, reconnects, connected_for, warning, frame_port}`, and forgetting the frames that arrived while nobody read |
 
 ## `Head`
 
@@ -49,7 +51,7 @@ Live options: `timeout` (s per request, default 10), `sync_clock` (default `True
 | `gain`, `tvg` | current values |
 | `config` | the configuration in the reader format (`opensonar.son.HeadConfig`), used by the image generator |
 | `n_pings` | number of pings in the file; `None` when live |
-| `ping(i=None)` | file: ping `i`, or the next one in sequence; live: a new ping |
+| `ping(i=None, timeout=None)` | file: ping `i`, or the next one in sequence; live: a new ping. `timeout` (live `.aris` family, which streams frames): s to wait, then `NoPing` |
 | `pings(start=None, n=None)` | iterator; stops at the end of a file, endless when live |
 | `stream(real_time=False, on_ping=None, on_demand=None)` | `Stream`: fetches pings in a thread and keeps only the latest; `on_ping(p)` sees all of them; on demand (default without `on_ping`) only requests the next one after the read |
 | `adjust_range(start, stop)` | live; the values are clamped to `limits`. On a file → `ApiError` |
@@ -57,9 +59,10 @@ Live options: `timeout` (s per request, default 10), `sync_clock` (default `True
 | `image(ping, kind="xy", smooth=True, crop=False)` | `(u16 image, geometry)`; `kind` is `"xy"` (fan) or `"rtheta"`; `smooth=False` skips the 3×3 mean; `crop=True` (XY) renders only the window within the ping range |
 | `frame(ping)` | the ping as a `Frame` |
 
-On a `.aris` file the head is a `FrameHead`: its pings already are `Frame`s, `config`, `gain`, `tvg` and
+On `.aris` and `.ddf` files and live `.aris` sonars the head is a `FrameHead`: its pings already are `Frame`s, `config`, `gain`, `tvg` and
 `center_freq` are `None`, `transducers` is empty, and `image()` builds the fan from the frame
-(`smooth` and `crop` do not apply).
+(`smooth` and `crop` do not apply). Live, `limits` are what the sonar timing allows, and `gain` is the
+receiver gain in use.
 
 ## `Frame` (common to every sonar family)
 `number`, `timestamp` (Unix s, UTC), `intensity` (samples × beams; row 0 = nearest range),
@@ -124,7 +127,9 @@ emulator in another process, the P900 records 18.7 pings/s and shows 9.5 fps.
 
 ## Errors
 All derive from `opensonar.OpenSonarError`: `SonError` (file), `opensonar.net.NetError` (network) and
-`ApiError` (API usage, such as a missing head, an adjustment on a file or a ping out of range).
+`ApiError` (API usage, such as a missing head, an adjustment on a file or a ping out of range), with
+`NoPing` (a live ping that did not come within `timeout`). The readers and the `.aris` driver raise
+`opensonar.formats.aris.ArisError`, `opensonar.formats.ddf.DdfError` and `opensonar.aris_net.ArisNetError`.
 
 ## Command line on top of the API
 `opensonar live SOURCE [--head N] [--range [START] STOP] [--gain G] [--tvg T] [--npz DIR] [--record FILE.son] [--pings N]`

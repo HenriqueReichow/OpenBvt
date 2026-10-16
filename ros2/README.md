@@ -12,8 +12,8 @@ the service owns the sonar, and the node turns its ZeroMQ messages into ROS topi
 running, the node starts one, and stops it when the node exits. The node needs only `python3-zmq` and
 `numpy`, not the opensonar library: the ROS Python (3.10) is not the Python bundled in the opensonar `.deb`.
 
-> **Status:** stage 1. Image, raw, info, status, events and diagnostics, tested with
-> the emulator. Next: R-Theta as `marine_acoustic_msgs/ProjectedSonarImage`, parameters changing
+> **Status:** image, raw (P900/M900) or beam frames (`.aris`, `.ddf`), info, status, events,
+> diagnostics and the optional simulator imaging-sonar output, tested with both emulators. Next: R-Theta as `marine_acoustic_msgs/ProjectedSonarImage`, parameters changing
 > while running, the start/stop/record/mark services, TF, replay with `/clock`, RViz config and
 > launch_testing tests.
 
@@ -46,11 +46,16 @@ ros2 launch opensonar_ros sonar.launch.py params:=my_sonar.yaml       # heads, r
 ```sh
 .venv/bin/python tools/sonar_emulator.py samples/exp1.son --compress &       # a P900-130 on port 1149
 ros2 launch opensonar_ros sonar.launch.py source:=127.0.0.1:1149
+
+.venv/bin/python tools/aris_emulator.py samples/sample.aris &                 # a .aris sonar on TCP 56888
+ros2 launch opensonar_ros sonar.launch.py source:=127.0.0.1 family:=aris      # system_type from its beacon
 ```
+**A live `.aris` sonar:** `source:=<ip> family:=aris`. The service is the sonar's only client: run the
+GUI and the node against the same service (they share it).
 To use the repository's service instead of the installed one, set
 `server_command: "/path/to/opensonar/.venv/bin/opensonar server"` in the parameter file.
 
-**Replay of a `.son` file:** `source:=/path/recording.son` already publishes the file at the recorded
+**Replay of a recording:** `source:=/path/recording.son` (or `.aris`, `.ddf`) already publishes the file at the recorded
 pace, with the recorded timestamps. Publishing `/clock` for `use_sim_time` comes in the next stage.
 
 Several programs can share the sonar: the GUI and the node can both be clients of the same service.
@@ -90,7 +95,7 @@ Under the node's namespace (default `/sonar`), for each head N in `heads`:
 | `headN/image` | `sensor_msgs/Image` `mono16` | best effort, depth 5 | XY fan, cropped to the range; row 0 = farthest, the sonar at the bottom centre |
 | `headN/raw` | `opensonar_msgs/RawPing` | reliable, depth 200 | P900/M900: raw 12-bit signal of every transducer (+ Q), bins/resolution of this ping, compact configuration |
 | `headN/sim_imaging_sonar` | the type in `sim_imaging_sonar_type` | reliable | optional, both families: the ping in a simulator's imaging-sonar message, so a digital twin takes real and simulated sonars the same way (below) |
-| `headN/frame` | `opensonar_msgs/BeamFrame` | reliable, depth 200 | `.aris` family (instead of `raw`): u8 intensities, samples × beams (row 0 = nearest), range start and step, beam angles (+ left) |
+| `headN/frame` | `opensonar_msgs/BeamFrame` | reliable, depth 200 | `.aris` and `.ddf` (instead of `raw`): u8 intensities, samples × beams (row 0 = nearest), range start and step, beam angles (+ left) |
 | `headN/info` | `opensonar_msgs/SonarInfo` | reliable, **transient_local** | head description, published on connect and when range, gain, TVG, sound speed or the ping rate (> 10 %) change |
 | `status` | `opensonar_msgs/SonarStatus` | depth 10, 1 Hz | connection, pinging, published/received/lost pings, recording, clock offset, error |
 | `events` | `opensonar_msgs/EventMark` | depth 50 | event marks (GUI ⚑ Mark, `opensonar ctl mark`) |
@@ -136,15 +141,16 @@ The service's own test checks that this rebuilds identical XY and R-Theta images
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| `source` | `192.168.1.45` | sonar IP, `ip:port` (emulator), or a `.son` / `.aris` path |
+| `source` | `192.168.1.45` | sonar IP, `ip:port` (emulator), or a `.son` / `.aris` / `.ddf` path |
 | `family` | `""` | `"aris"` for a live sonar of the `.aris` family (also `family:=aris` in the launch file) |
 | `system_type` | `-1` | `.aris` family: 0, 1 or 2; < 0 = from the sonar beacon |
 | `heads` | `[0]` | heads to ping (in turn) and publish |
 | `range` | `[0.0]` | `[stop]` or `[start, stop]` in m for every head; `[0.0]` keeps the sonar's |
 | `gain`, `tvg` | `-1.0` | < 0 keeps the sonar's |
 | `frame_prefix` | `sonar_head` | frame of head N |
+| `sim_imaging_sonar_type` | `""` | `"<package>/msg/<Type>"` of a simulator's imaging-sonar message; `""` = no `sim_imaging_sonar` topic |
 | `smooth` | `true` | 3×3 mean on the images |
-| `replay_speed` | `1.0` | `.son` / `.aris` source: 1 = recorded pace (with the recorded stamps), 2 = twice as fast, 0 = as fast as possible |
+| `replay_speed` | `1.0` | recording source: 1 = recorded pace (with the recorded stamps), 2 = twice as fast, 0 = as fast as possible |
 | `publish_image`, `publish_raw`, `publish_info`, `publish_diagnostics` | `true` | which topics |
 | `image_qos_depth`, `raw_qos_depth` | 5, 200 | history depths |
 | `service_host`, `rep_port`, `pub_port` | `127.0.0.1`, 4545, 4546 | the opensonar service |

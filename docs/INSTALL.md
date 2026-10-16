@@ -57,8 +57,10 @@ Notes:
 - Polkit cannot single out one NetworkManager profile, so the rule allows users of a **local, active
   session** to bring any profile up or down. That is already Ubuntu's default for desktop users: the
   rule only makes it explicit.
-- The sonar's factory IP is 192.168.1.45. If yours differs, change the profile's address with
-  `nmcli connection modify opensonar-net ipv4.addresses <IP>/24`.
+- The P900/M900 factory IP is 192.168.1.45; `.aris` sonars take a link-local 169.254.x.x address when
+  there is no DHCP server, which the second address of the profile reaches. If your subnet differs,
+  change the addresses with
+  `nmcli connection modify opensonar-net ipv4.addresses 192.168.1.10/24,169.254.10.10/16` (your values).
 
 ### The service on the ROV computer (no GUI)
 ```sh
@@ -75,8 +77,9 @@ Time synchronisation with the ROV: [`SYNC.md`](SYNC.md).
 
 ### Updating and uninstalling
 ```sh
-sudo apt install ./opensonar_<new version>_amd64.deb   # update: keeps the network profile and /etc/default/opensonar-server
-sudo apt remove opensonar                              # removes the program, the menu entry, the service and the network profile
+sudo apt install ./opensonar_<new version>_amd64.deb   # update: keeps the network profile (adds the second address) and /etc/default/opensonar-server
+sudo apt install --reinstall ./opensonar_<same version>_amd64.deb   # a rebuilt package with the same version
+sudo apt remove opensonar                              # removes the program, the menu entry, the service, the network profile and the ufw rules
 sudo apt purge opensonar                               # also removes /etc/default/opensonar-server and /var/lib/opensonar
 ```
 Nothing is left in `/opt`, `/usr`, `/lib/systemd` or NetworkManager. Recordings you made elsewhere are
@@ -125,7 +128,7 @@ PySide6, which saves about 500 MB. The Python is isolated from the build machine
 | desktop entry valid, icons, systemd unit valid and disabled, polkit files | ✅ | ✅ |
 | AppImage | ✅ | ✅ |
 | purge leaves nothing behind | ✅ | ✅ |
-| with systemd + NetworkManager (privileged container): profile created by the installer (manual 192.168.1.10/24, never-default, not autoconnect), service enabled and serving, upgrade keeps profile and settings, purge removes the profile | — | ✅ |
+| with systemd + NetworkManager (privileged container): profile created by the installer (manual 192.168.1.10/24 + 169.254.10.10/16, never-default, not autoconnect), service enabled and serving, upgrade keeps profile and settings, purge removes the profile | — | ✅ |
 
 ### On the real PC (2026-10-14, Ubuntu 22.04 desktop, M900/2250-130 on `enp4s0`)
 The .deb installed with `sudo apt install`, then:

@@ -119,7 +119,7 @@ folder.
 
 | Format | Recorded by | What you get (base path `/data/session`) |
 |---|---|---|
-| **.son** | the service, every ping | `session.son`: raw signal, rev 14, opens in opensonar (lossless; everything else can be made from it later) |
+| **raw** (`.son` / `.aris`) | the service, every ping | `session.son`: raw signal, rev 14 (P900/M900); `session.aris` for the `.aris` family, the frames with their headers. Lossless, opens in opensonar; everything else can be made from it later. Not available while playing a `.ddf` |
 | **MP4 video** | the window | `session.mp4`: the panels as shown (colours, grid, ruler, several heads), 10 frames/s in real time |
 | **NPY** | the service, every ping | `session_npy/h<head>/ping_000000.npy …`: XY image, uint16 |
 | **NPZ** | the service, every ping | `session_npz/h<head>/…`: XY image + time, range, resolution, origin |
