@@ -35,17 +35,25 @@ ACOUSTIC_FIELDS = {
     "enable_transmit": (9, "u"), "high_freq": (10, "u"), "enable_150v": (11, "u"), "receiver_gain": (12, "f"),
 }
 
-# starting settings per sonar type (system type: 0, 1, 2), as suggested for each one
+# starting settings per sonar type (system type: 0, 1, 2), valid examples for each one in fresh water:
+# 0 → 1.5–7.5 m, 1 → 1.5–5 m, 2 → 4–24 m; focus at the middle of the window
 DEFAULTS = {
-    0: dict(high_freq=1, ping_mode=3, samples_per_beam=1000, sample_period=4, sample_start_delay=1360,
-            cycle_period=5720, pulse_width=6, frame_rate=12.0, receiver_gain=18.0, focus=2.5),
-    1: dict(high_freq=1, ping_mode=9, samples_per_beam=800, sample_period=4, sample_start_delay=1360,
-            cycle_period=4920, pulse_width=6, frame_rate=12.0, receiver_gain=12.0, focus=2.2),
-    2: dict(high_freq=1, ping_mode=1, samples_per_beam=512, sample_period=4, sample_start_delay=1333,
-            cycle_period=3750, pulse_width=5, frame_rate=8.0, receiver_gain=20.0, focus=1.75),
+    0: dict(high_freq=1, ping_mode=3, samples_per_beam=1014, sample_period=8, sample_start_delay=2028,
+            cycle_period=10500, pulse_width=11, frame_rate=15.0, receiver_gain=18.0, focus=4.5),
+    1: dict(high_freq=1, ping_mode=9, samples_per_beam=946, sample_period=5, sample_start_delay=2028,
+            cycle_period=7118, pulse_width=10, frame_rate=15.0, receiver_gain=12.0, focus=3.25),
+    2: dict(high_freq=1, ping_mode=1, samples_per_beam=1082, sample_period=25, sample_start_delay=5408,
+            cycle_period=32818, pulse_width=24, frame_rate=10.0, receiver_gain=20.0, focus=14.0),
 }
-SAMPLE_PERIOD = (4, 100)                     # µs, allowed range
+# valid ranges of the acoustic settings (the sonar ignores invalid ones)
+SAMPLE_PERIOD = (4, 100)                     # µs
+SAMPLES_PER_BEAM = (128, 4096)
+START_DELAY = (930, 60000)                   # µs
+CYCLE_PERIOD = (1802, 150000)                # µs
+FRAME_RATE = (1.0, 15.0)
+GAIN = (0.0, 24.0)                           # dB
 CYCLE_MARGIN = 360                           # µs after the last sample before the next ping
+PINGS_PER_FRAME = {1: 3, 3: 6, 6: 4, 9: 8}
 NOMINAL_SOUND_SPEED = 1500.0                 # m/s, until the first frame tells the real one
 
 
@@ -151,6 +159,13 @@ def discover(timeout=2.0, port=BEACON_PORT):
     return list(found.values())
 
 
+DEFAULTS_RATE = 15.0                         # frames/s asked for; lowered when the cycle does not allow it
+
+
+def _clamp(v, lo, hi):
+    return min(max(v, lo), hi)
+
+
 # ---------------------------------------------------------------- the connection
 
 class ArisNet:
@@ -185,9 +200,13 @@ class ArisNet:
         self._udp.bind(("", 0))
         self._udp.settimeout(timeout)
         self._tcp = socket.create_connection((host, command_port), timeout=timeout)
-        self._send(SET_DATETIME, encode([(1, time.strftime("%Y-%b-%d %H:%M:%S"))]))
         receiver = [(1, self._udp.getsockname()[1])] + ([(2, frame_ip)] if frame_ip else [])
         self._send(SET_FRAMESTREAM_RECEIVER, encode(receiver))
+        # English month names whatever the locale
+        t = time.localtime()
+        months = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split()
+        self._send(SET_DATETIME, encode([(1, f"{t.tm_year}-{months[t.tm_mon - 1]}-{t.tm_mday:02d} "
+                                            f"{t.tm_hour:02d}:{t.tm_min:02d}:{t.tm_sec:02d}")]))
         self._send_acoustics()
         self._send(SET_SALINITY, encode([(1, 0)]))
         self._send(SET_FOCUS, encode([(2, float(self.focus))]))
@@ -211,9 +230,9 @@ class ArisNet:
                 return
 
     def limits(self):
-        """(minimum, maximum) range in m that the ping cycle allows (start delay ≥ 930 µs, cycle ≤ 65535 µs)."""
+        """(minimum, maximum) range in m: start delay ≥ 930 µs; end ≤ 60000 µs + 4096 samples × 100 µs."""
         c = self.sound_speed
-        return 930e-6 * c / 2, (65535 - CYCLE_MARGIN) * 1e-6 * c / 2
+        return START_DELAY[0] * 1e-6 * c / 2, (START_DELAY[1] + SAMPLES_PER_BEAM[1] * SAMPLE_PERIOD[1]) * 1e-6 * c / 2
 
     def window(self):
         """(start, stop) in m of the current settings."""
@@ -222,18 +241,29 @@ class ArisNet:
         return start, start + s["sample_period"] * s["samples_per_beam"] * 1e-6 * c / 2
 
     def adjust_range(self, start, stop):
-        """Sample window: start delay from `start`, sample period (4–100 µs) to cover up to `stop`."""
+        """Sample window [start, stop] m, keeping the sample period and changing the sample count; the
+        period grows only when 4096 samples are not enough. The cycle period and frame rate follow."""
         c, s = self.sound_speed, self.settings
-        delay = max(930, int(round(2 * start / c * 1e6)))
-        period = int(np.ceil(2 * (stop - start) / c * 1e6 / s["samples_per_beam"]))
-        period = min(max(period, SAMPLE_PERIOD[0]), SAMPLE_PERIOD[1])
-        s.update(sample_start_delay=delay, sample_period=period,
-                 cycle_period=min(65535, delay + period * s["samples_per_beam"] + CYCLE_MARGIN))
+        delay = _clamp(int(round(2 * start / c * 1e6)), *START_DELAY)
+        length = max(2 * (stop - start) / c * 1e6, 1.0)                 # µs of sampling
+        period = _clamp(max(s["sample_period"], int(np.ceil(length / SAMPLES_PER_BEAM[1]))), *SAMPLE_PERIOD)
+        samples = _clamp(int(np.ceil(length / period)), *SAMPLES_PER_BEAM)
+        s.update(sample_start_delay=delay, sample_period=period, samples_per_beam=samples)
+        self._fit_timing()
         self._send_acoustics()
 
     def adjust_gain(self, gain):
-        self.settings["receiver_gain"] = float(gain)
+        self.settings["receiver_gain"] = float(_clamp(float(gain), *GAIN))
         self._send_acoustics()
+
+    def _fit_timing(self):
+        """Cycle period ≥ delay + samples × period + 360 µs, and frame period > cycle × pings per frame."""
+        s = self.settings
+        cycle = _clamp(s["sample_start_delay"] + s["sample_period"] * s["samples_per_beam"] + CYCLE_MARGIN,
+                       *CYCLE_PERIOD)
+        pings = PINGS_PER_FRAME.get(s["ping_mode"], 8)
+        fastest = 1e6 / (cycle * pings + 1)
+        s.update(cycle_period=cycle, frame_rate=float(_clamp(min(DEFAULTS_RATE, fastest), *FRAME_RATE)))
 
     # --- frames ---
     def frame(self):

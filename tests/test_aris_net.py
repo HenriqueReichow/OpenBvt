@@ -71,7 +71,7 @@ class TestLive(unittest.TestCase):
             # the emulator numbers frames from 1 and loops over the file
             np.testing.assert_array_equal(f.intensity, self.data[(f.number - 1) % 4][:, ::-1])
         self.assertGreaterEqual(len(got), 5)
-        self.assertEqual(self.emu.commands[:5], [aris_net.SET_DATETIME, aris_net.SET_FRAMESTREAM_RECEIVER,
+        self.assertEqual(self.emu.commands[:5], [aris_net.SET_FRAMESTREAM_RECEIVER, aris_net.SET_DATETIME,
                                                  aris_net.SET_ACOUSTICS, aris_net.SET_SALINITY,
                                                  aris_net.SET_FOCUS])
 
@@ -86,7 +86,20 @@ class TestLive(unittest.TestCase):
         self.assertAlmostEqual(st["receiver_gain"], 7.0)
         self.assertEqual(st["sample_start_delay"], round(2 * 2.0 / 1500 * 1e6))
         self.assertGreaterEqual(st["sample_period"] * st["samples_per_beam"] * 1500 / 2e6, 8.0)
-        self.assertGreater(st["cycle_period"], st["sample_start_delay"])
+        # the validity rules of the settings
+        self.assertGreaterEqual(st["cycle_period"],
+                                st["sample_start_delay"] + st["sample_period"] * st["samples_per_beam"] + 360)
+        self.assertGreater(1e6 / st["frame_rate"], st["cycle_period"] * 3)
+        self.assertTrue(128 <= st["samples_per_beam"] <= 4096 and 4 <= st["sample_period"] <= 100)
+
+    def test_long_range_raises_the_sample_period(self):
+        with self.open() as s:
+            s.heads[0].adjust_range(1.0, 80.0)
+            time.sleep(0.2)
+        st = self.emu.settings
+        self.assertEqual(st["samples_per_beam"] * st["sample_period"] >= 2 * 79 / 1500 * 1e6, True)
+        self.assertLessEqual(st["samples_per_beam"], 4096)
+        self.assertGreaterEqual(st["frame_rate"], 1.0)
 
     def test_keepalive(self):
         with self.open() as s:

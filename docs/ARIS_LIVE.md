@@ -33,12 +33,26 @@ Field 1 is the type; the sub-message goes in the field of that type.
 | 6 `SET_FOCUS` | 8 | 2: focus range in m (f32) |
 | 14 `PING` | 16 | empty (keepalive) |
 
-Connection sequence: date/time → frame receiver → acoustic settings → salinity → focus, then `PING`
-every second. Starting settings per sonar type are in `aris_net.DEFAULTS`.
+Connection sequence: frame receiver → date/time (English month names) → acoustic settings → salinity
+→ focus, then `PING` every second. The sonar sends no frame until it gets valid acoustic settings, and
+it does not acknowledge commands. Starting settings per sonar type (`aris_net.DEFAULTS`) are known-valid
+examples: type 0 → 1.5–7.5 m, type 1 → 1.5–5 m, type 2 → 4–24 m, in fresh water.
 
-`adjust_range(start, stop)`: start delay = 2·start/c, sample period = ⌈2·(stop − start)/(c·samples)⌉
-clamped to 4–100 µs, cycle period = delay + period·samples + 360 µs. `adjust_gain(g)` sets the receiver
-gain. TVG is not available.
+Valid acoustic settings (invalid ones are ignored by the sonar):
+
+| Field | Range |
+|---|---|
+| samples per beam | 128–4096 |
+| sample start delay | 930–60000 µs |
+| sample period | 4–100 µs |
+| cycle period | 1802–150000 µs, and ≥ start delay + samples × period + 360 µs |
+| frame rate | 1–15 frames/s, and 10⁶/frame rate > cycle period × pings per frame |
+| receiver gain | 0–24 dB |
+
+`adjust_range(start, stop)`: start delay = 2·start/c; the sample period is kept and the sample count
+changes to cover the window (the period grows only when 4096 samples are not enough); then the cycle
+period and the frame rate (at most 15) follow the rules above. `adjust_gain(g)` sets the receiver gain.
+TVG is not available. The sonar may still shorten the pulse width to limit transmitted energy.
 
 ## Frame parts (`FramePart`)
 | Field | Meaning |
@@ -54,6 +68,13 @@ ones. Live samples come **unordered** (header field `reordered` = 0): each ping 
 channels, and channel *c* of ping *p* goes to beam `p + map[c]·pings` with
 `map = 10 2 14 6 8 0 12 4 11 3 15 7 9 1 13 5` and pings per frame 3, 6, 4, 8 for ping modes 1, 3, 6, 9
 (`formats.aris.reorder`). The header layout is the one in [`ARIS_FORMAT.md`](ARIS_FORMAT.md).
+
+## Network
+- The sonar gets its address by DHCP or, without a DHCP server, a link-local one (169.254.x.x): the
+  PC must be on the same network (for a direct cable, a link-local address on the PC works).
+- The firewall must let in UDP 56124 (beacons) and the frame port (a random one chosen by the driver).
+- Only one controller at a time: a beacon with "busy" means another program is connected.
+- After a connection the sonar also sends its log to the PC by syslog (UDP 514); it is not used here.
 
 ## Not covered yet
 Acknowledging frame parts (field 6, ack port), rotator, telephoto lens and focus control beyond the
