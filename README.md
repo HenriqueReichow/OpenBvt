@@ -79,10 +79,19 @@ For now, the **P900** and **M900** families. More sonar types are planned.
 ## Installation
 
 ### Packages (no Python setup needed)
+Download the .deb or the AppImage from the
+[Releases page](https://github.com/HenriqueReichow/OpenSonar/releases), then:
 ```sh
 sudo apt install ./opensonar_4.1.0_amd64.deb      # Ubuntu 22.04 / 24.04: menu entry, `opensonar` command,
                                                  # sonar network profile, optional systemd service
 ./opensonar-4.1.0-x86_64.AppImage                  # or: any Linux, no installation
+```
+Or build them locally (~5 min, needs internet); they land in `dist/`:
+```sh
+sudo apt install fakeroot curl
+sh packaging/build.sh
+sudo apt install ./dist/opensonar_4.1.0_amd64.deb
+./dist/opensonar-4.1.0-x86_64.AppImage             # or the AppImage
 ```
 Python and every dependency are bundled. The .deb also creates the **opensonar-net** network profile
 (192.168.1.10/24 on the wired card), so the GUI's **Configure sonar network** button sets up the

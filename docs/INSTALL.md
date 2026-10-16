@@ -9,6 +9,18 @@ Two packages, both with **Python 3.12 and every dependency bundled**: no venv, n
 
 For development, the `pip install -e ".[gui,viewer]"` route of the README is still the one to use.
 
+**Getting the packages**, either way:
+1. Download them from the [Releases page](https://github.com/HenriqueReichow/OpenSonar/releases).
+2. Or build them locally (~5 min, needs internet; see [section 3](#3-building-the-packages)):
+   ```sh
+   sudo apt install fakeroot curl
+   sh packaging/build.sh                 # → dist/opensonar_4.1.0_amd64.deb and dist/opensonar-4.1.0-x86_64.AppImage
+   sudo apt install ./dist/opensonar_4.1.0_amd64.deb
+   ```
+   With a local build, the AppImage commands below use `./dist/opensonar-4.1.0-x86_64.AppImage`.
+
+The commands below assume the downloaded file is in the current folder.
+
 ## 1. The .deb (recommended)
 
 ```sh
