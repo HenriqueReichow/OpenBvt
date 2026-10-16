@@ -111,6 +111,9 @@ class Ping:
     signals: list                 # one np.uint16 per transducer (I channel)
     signals_q: list
     raw_orientations: list = field(default_factory=list)      # raw ping orientations (subtypes 3, 4)
+    # read from a file: a signal shorter than the window is padded to it (IMAGING.md §3.1). Live
+    # pings are not padded: the reference software only does it for recordings.
+    pad_to_window: bool = True
 
     def max_signal(self):
         """Maximum signal: largest excursion from 2048, over 2047."""

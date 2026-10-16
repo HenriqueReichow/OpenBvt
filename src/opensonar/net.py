@@ -228,7 +228,7 @@ def ping_from_xml(el, attachments, head, clock_offset=0.0):
     order = [channels.get(t.index, empty) for t in head.transducers] if head.transducers else list(channels.values())
     ts = round(_f(el, "Timestamp") - clock_offset, 3)       # rounded to ms (§6)
     return Ping(_i(el, "Number"), ts, -time.timezone, _f(el, "WindowStart"), _f(el, "WindowStop"),
-                [c[0] for c in order], [c[1] for c in order])
+                [c[0] for c in order], [c[1] for c in order], pad_to_window=False)
 
 
 # ---------------------------------------------------------------- discovery (§8)

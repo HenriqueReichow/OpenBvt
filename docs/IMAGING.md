@@ -32,8 +32,12 @@ US 8 811 120 and US 8 964 507 ("Systems and methods implementing frequency-steer
   otherwise int(256 · (0.1 + 0.55 · (L − 5)/95)). The constants are kept in float32, so the result
   is the same number for the same configuration.
 - Frames = samples // hop; frame rate = fs / hop.
-- A recording shorter than the range is padded with 2048 up to floor((stop − start) · 2/c · fs)
-  samples.
+- A **recorded** ping shorter than the range is padded with 2048 up to floor((stop − start) · 2/c · fs)
+  samples. A **live** ping is used as it comes, not padded: checked against the reference software
+  through the emulator (M900-130 at 1.0–4.9 m: 6089 samples, 243 rows live; the same ping read back
+  from a file is padded, as the recordings are). Open: in that live case the rows start one row
+  (1.6 cm) away from the reference (frame shift 31 against 30, start × frame rate = 30.96); with
+  recordings the frame shift matches the reference exactly.
 
 ### 3.2 Spectrogram per transducer
 - Input value = 2048 − sample.

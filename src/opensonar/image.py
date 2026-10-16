@@ -97,9 +97,10 @@ def expected_samples(head, ping, tr):
 
 
 def centered_signal(head, ping, t):
-    """2048 - sample, zero-padded at the end if the recording is shorter than the range."""
+    """2048 - sample; a recorded ping shorter than its range is zero-padded at the end (live pings are
+    used as they come, `Ping.pad_to_window`)."""
     x = F32(2048.0) - ping.signals[t].astype(F32)
-    n = expected_samples(head, ping, head.transducers[t])
+    n = expected_samples(head, ping, head.transducers[t]) if getattr(ping, "pad_to_window", True) else 0
     if x.size < n:
         x = np.concatenate([x, np.zeros(n - x.size, F32)])
     return x

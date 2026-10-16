@@ -2,6 +2,7 @@
 
 Tests without samples/ use synthetic messages; the others are skipped without the .son files.
 """
+import dataclasses
 import os
 import socket
 import struct
@@ -117,6 +118,9 @@ class TestAgainstEmulator(unittest.TestCase):
                 self.assertLess(abs(p.timestamp - q.timestamp), 0.01)
                 for a, b in zip(p.signals, q.signals):
                     self.assertTrue(np.array_equal(a, b))
+                # a live ping is not padded to its window, a recorded one is (as the reference software
+                # does): compare with the recorded ping taken as live
+                q = dataclasses.replace(q, pad_to_window=False)
                 for render in (xy, rtheta):
                     with self.subTest(model=model, compressed=compress, ping=i, kind=render.__name__):
                         self.assertTrue(np.array_equal(render(s.heads[0], p)[0], render(son.heads[0], q)[0]))
@@ -205,3 +209,46 @@ class TestDiscovery(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+M900 = os.path.join(ROOT, "samples", "extra", "M900-130-Bridge-pilings-and-exposed-cabling.son")
+
+
+@unittest.skipUnless(os.path.exists(M900), "no samples/extra/M900-130-Bridge-...son")
+class TestLiveRThetaRows(unittest.TestCase):
+    """Live pings are not padded to the window, recorded ones are -- as the reference software does.
+
+    Measured with the reference software through the emulator, M900-130 at 1.0-4.9 m: the ping has
+    6089 samples (fewer than the window implies at its sound speed), and the R-Theta has 243 rows of
+    0.016047 m from 4.3809 m down to 0.4975 m. Read from the file, the same recording pads (853 rows).
+    """
+
+    def test_m900_live_rows_match_the_reference(self):
+        import opensonar
+        from sonar_emulator import Emulator
+        emu = Emulator(M900, compress_signal=True)
+        emu.quiet = True
+        threading.Thread(target=emu.serve_tcp, args=(0,), daemon=True).start()
+        while emu.tcp_port is None:
+            time.sleep(0.01)
+        with opensonar.open(f"127.0.0.1:{emu.tcp_port}") as s:
+            h = s.heads[0]
+            h.adjust_range(1.0, 4.9)
+            p = h.ping()
+            img, geo = h.image(p, "rtheta")
+        self.assertFalse(p.pad_to_window)
+        self.assertEqual(p.signals[0].size, 6089)
+        self.assertEqual(img.shape[0], 243)
+        self.assertAlmostEqual(float(geo["res"]), 0.016047, places=5)
+        # the rows are offset by ONE row from the reference here (frame shift 31 against its 30;
+        # start x frame rate = 30.96): still open, so it is bounded, not hidden
+        self.assertLessEqual(abs(float(geo["ranges"][0]) - 4.3809), float(geo["res"]) + 1e-4)
+        self.assertLessEqual(abs(float(geo["ranges"][-1]) - 0.4975), float(geo["res"]) + 1e-4)
+
+    def test_m900_file_still_pads(self):
+        import opensonar
+        with opensonar.open(M900) as s:
+            h = s.heads[0]
+            img, geo = h.image(h.ping(0), "rtheta")
+        self.assertEqual(img.shape[0], 853)                         # the reference software: 853 too
+        self.assertAlmostEqual(float(geo["res"]), 0.050898, places=5)
