@@ -93,6 +93,21 @@ def head_config(cfg):
     return out
 
 
+def head_info(head):
+    """head_config of a raw-signal head; for a head that hands out frames (no configuration), the
+    model, range limits, sound speed and beam angles."""
+    if head.config is not None:
+        return head_config(head.config)
+    import hashlib
+    lo, hi = head.limits
+    angles = [float(a) for a in head._first.beam_angles]
+    out = {"model": head.model, "family": head.sonar.sonar_type, "sound_speed": float(head.sound_speed),
+           "range_min": float(lo), "range_max": float(hi), "beams": len(angles), "beam_angles": angles,
+           "transducers": []}
+    out["config_id"] = hashlib.sha1(json.dumps(out, sort_keys=True).encode()).hexdigest()[:16]
+    return out
+
+
 def _lite(kind, geo):
     if kind == "xy":
         return {k: geo[k] for k in ("res", "origin_row", "origin_col")}
@@ -103,14 +118,13 @@ def _lite(kind, geo):
 
 def _render_worker(configs, jobs, results):
     """Child process: renders XY images, so the service's threads never compete with it for the GIL."""
-    from . import image as _image
+    from .frame import render
     for job in iter(jobs.get, None):
         h, ping, smooth, kinds = job
         try:
             out = []
             for kind in kinds:
-                img, geo = (_image.xy(configs[h], ping, smooth, crop=True) if kind == "xy"
-                            else _image.rtheta(configs[h], ping, smooth))
+                img, geo = render(configs[h], ping, kind, smooth, crop=True)
                 out.append((kind, img, _lite(kind, geo)))
             results.put((out, None, None))
         except Exception as e:  # noqa: BLE001 — sent back to the service
@@ -155,13 +169,13 @@ class Renderer:
 
 def _image_record_worker(configs, base, formats, smooth, jobs, results):
     """Child process: renders **every** recorded ping and writes it in the per-ping image formats."""
-    from . import image as _image
+    from .frame import render
     from .media import ImageSink
     sink = ImageSink(base, formats)
     error = None
     for h, ping in iter(jobs.get, None):
         try:
-            img, geo = _image.xy(configs[h], ping, smooth, crop=True)
+            img, geo = render(configs[h], ping, "xy", smooth, crop=True)
             sink.write(h, ping, img, geo)
         except Exception as e:  # noqa: BLE001 — reported when the recording stops
             error = f"{type(e).__name__}: {e}"
@@ -287,7 +301,12 @@ class Server:
         """Per-ping metadata besides the signal: R-Theta bins and resolution (they change with the range),
         gain, TVG, sound speed and the configuration id."""
         from .image import rtheta_geometry
-        cfg = self.sonar.head(h).config
+        head = self.sonar.head(h)
+        cfg = head.config
+        if cfg is None:                                        # a frame: its grid is the R-Theta image
+            return {"gain": head.gain, "tvg": None, "sound_speed": float(p.sound_speed),
+                    "config_id": self.config_ids.get(h, ""), "bins": int(p.n_samples), "beams": int(p.n_beams),
+                    "res": p.res, "bin_near": p.range_start, "bin_far": p.range_stop}
         out = {"gain": float(cfg.gain), "tvg": float(cfg.tvg_slope), "sound_speed": float(cfg.sound_speed),
                "config_id": self.config_ids.get(h, "")}
         try:
@@ -345,7 +364,18 @@ class Server:
     # --- commands ---
     def cmd_discover(self, timeout=2.0, probe=True):
         """Discovery; with `probe`, connects briefly to each sonar to add Model, Serial and Heads."""
+        from . import aris_net
+        from .formats.aris import SYSTEM_TYPES
         from .net import NetSonar, discover
+        beacons = []
+
+        def listen():                                          # sonars of the .aris family announce themselves
+            try:
+                beacons.extend(aris_net.discover(float(timeout)))
+            except OSError:                                    # beacon port in use
+                pass
+        listener = threading.Thread(target=listen, daemon=True)
+        listener.start()
         found = discover(float(timeout))
         for a in found if probe else ():
             host = f"{a['Host']}:{a.get('Port', 1149)}"
@@ -360,6 +390,11 @@ class Server:
                                  Serial=str(s.serial or ""), Heads=[h.model for h in s.heads])
             except (OpenSonarError, OSError) as e:
                 a["ProbeError"] = str(e)
+        listener.join()
+        for b in beacons:
+            found.append({"Host": b["host"], "Port": aris_net.COMMAND_PORT, "Family": "aris",
+                          "Model": SYSTEM_TYPES.get(b["system_type"], "?"), "Serial": str(b["serial"]),
+                          "SystemType": b["system_type"], "Busy": b["busy"]})
         return {"sonars": found}
 
     def cmd_connect(self, source=None, **options):
@@ -367,7 +402,7 @@ class Server:
         self.sonar = sdk.open(source, **options)
         self.serial = str(self.sonar.serial or "0")
         self.error = None
-        self.config_ids = {h.index: head_config(h.config)["config_id"] for h in self.sonar.heads}
+        self.config_ids = {h.index: head_info(h)["config_id"] for h in self.sonar.heads}
         return self.cmd_heads()
 
     def cmd_disconnect(self):
@@ -437,7 +472,7 @@ class Server:
         with opensonar (`opensonar.son.config_from_dict`): see docs/SERVER.md."""
         s = self._need_sonar()
         heads = s.heads if head is None else [s.head(int(head))]
-        return {"heads": [dict(head_config(h.config), head=h.index) for h in heads]}
+        return {"heads": [dict(head_info(h), head=h.index) for h in heads]}
 
     # --- playback of a file ---
     def _file_head(self):
@@ -501,25 +536,26 @@ class Server:
         return {"mark": mark, "file": path}
 
     def cmd_record(self, path, formats=("son",)):
-        """Records every ping. formats: "son" (the raw .son at `path`) and/or the per-ping XY images
-        "npy", "npz", "png", "tiff" (folders <path without .son>_<fmt>/h<head>/ with index.csv)."""
+        """Records every ping. formats: "son" (the lossless recording at `path`: .son, or .aris for a sonar
+        of that family) and/or the per-ping XY images "npy", "npz", "png", "tiff"
+        (folders <path without extension>_<fmt>/h<head>/ with index.csv)."""
         from .media import IMAGE_FORMATS
-        from .writer import SonWriter
+        from .writer import raw_writer
         s = self._need_sonar()
         formats = [str(f).lower() for f in ([formats] if isinstance(formats, str) else formats)]
         unknown = set(formats) - {"son"} - set(IMAGE_FORMATS)
         if unknown or not formats:
             raise OpenSonarError(f"formats must be some of son, {', '.join(IMAGE_FORMATS)} (got {formats})")
         path = str(path)
-        base = path[:-4] if path.lower().endswith(".son") else path
+        base = os.path.splitext(path)[0] if os.path.splitext(path)[1].lower() in (".son", ".aris") else path
         with self._lock:
             if self.record_path is not None:
                 raise OpenSonarError(f"already recording to {self.record_path}")
-            self.writer = SonWriter.for_sonar(base + ".son", s) if "son" in formats else None
+            self.writer, raw_path = raw_writer(base, s) if "son" in formats else (None, None)
             images = [f for f in formats if f in IMAGE_FORMATS]
             self.image_recorder = ImageRecorder([h.config for h in s.heads], base, images, self.smooth) \
                 if images else None
-            self.record_path, self.recorded, self.formats = base + ".son" if self.writer else base, 0, formats
+            self.record_path, self.recorded, self.formats = raw_path or base, 0, formats
             self.record_started, self.marks = time.time(), 0
             self.events_path = base + ".events.csv"
         return {"path": self.record_path, "formats": formats}

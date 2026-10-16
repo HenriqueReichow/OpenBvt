@@ -42,7 +42,7 @@ def polar(x, y):
     return math.hypot(x, y), math.degrees(math.atan2(x, y))
 
 
-FORMAT_LABELS = (("son", ".son (raw)"), ("mp4", "MP4 video (as on screen)"), ("npy", "NPY (u16 per ping)"),
+FORMAT_LABELS = (("son", "raw (.son, or .aris for those sonars)"), ("mp4", "MP4 video (as on screen)"), ("npy", "NPY (u16 per ping)"),
                  ("npz", "NPZ (u16 + metadata)"), ("png", "PNG 16 bit"), ("tiff", "TIFF 16 bit"))
 
 
@@ -382,7 +382,7 @@ def build(service=None, settings=None):
             vbox.setContentsMargins(0, 0, 0, 0)
             self.panels = W.QWidget()
             self.panel_layout = W.QGridLayout(self.panels)
-            self.placeholder = W.QLabel("Discover or type a sonar IP, or open a .son file, then press Start.")
+            self.placeholder = W.QLabel("Discover or type a sonar IP, or open a .son or .aris file, then press Start.")
             self.placeholder.setAlignment(QtCore.Qt.AlignCenter)
             self.panel_layout.addWidget(self.placeholder, 0, 0)
             vbox.addWidget(self.panels, 1)
@@ -414,12 +414,17 @@ def build(service=None, settings=None):
             row = W.QHBoxLayout()
             self.ip = W.QLineEdit(self.settings.value("last_ip", "192.168.1.45"))
             self.ip.setPlaceholderText("IP or ip:port")
-            self.ip.returnPressed.connect(self.connect_ip)
+            self.ip.returnPressed.connect(lambda: self.connect_ip())
+            self.family = W.QComboBox()
+            self.family.addItem("P900 / M900", "")
+            self.family.addItem(".aris sonar", "aris")
+            self.family.setCurrentIndex(max(0, self.family.findData(self.settings.value("last_family", ""))))
             self.btn_connect_ip = W.QPushButton("Connect")
-            self.btn_connect_ip.clicked.connect(self.connect_ip)
+            self.btn_connect_ip.clicked.connect(lambda: self.connect_ip())
             row.addWidget(self.ip)
+            row.addWidget(self.family)
             row.addWidget(self.btn_connect_ip)
-            self.btn_open = W.QPushButton("Open .son…")
+            self.btn_open = W.QPushButton("Open recording…")
             self.btn_open.clicked.connect(self.open_file)
             self.btn_disconnect = W.QPushButton("Disconnect")
             self.btn_disconnect.clicked.connect(self.disconnect)
@@ -688,9 +693,11 @@ def build(service=None, settings=None):
                 self.found.insertRow(r)
                 ip = a.get("Host", "")
                 port = a.get("Port", "1149")
+                family = a.get("Family", "")
                 for k, v in enumerate((a.get("Model", "?"), a.get("Serial", "?"),
-                                       ip if str(port) == "1149" else f"{ip}:{port}")):
+                                       ip if family or str(port) == "1149" else f"{ip}:{port}")):
                     self.found.setItem(r, k, QtWidgets.QTableWidgetItem(str(v)))
+                self.found.item(r, 2).setData(QtCore.Qt.UserRole, (family, a.get("SystemType")))
             if found:
                 self.found.selectRow(0)
             self.statusBar().showMessage(f"{len(found)} sonar(s) found", 4000)
@@ -711,24 +718,33 @@ def build(service=None, settings=None):
         def connect_selected(self):
             r = self.found.currentRow()
             if r >= 0:
-                self.ip.setText(self.found.item(r, 2).text())
-                self.connect_ip()
+                item = self.found.item(r, 2)
+                family, system_type = item.data(QtCore.Qt.UserRole) or ("", None)
+                self.ip.setText(item.text())
+                self.family.setCurrentIndex(max(0, self.family.findData(family)))
+                self.connect_ip(system_type)
 
-        def connect_ip(self):
+        def connect_ip(self, system_type=None):
             text = self.ip.text().strip()
-            if text and self.connect_to(text):
+            family = self.family.currentData()
+            options = {"family": family} if family else {}
+            if family and system_type is not None:
+                options["system_type"] = system_type
+            if text and self.connect_to(text, **options):
                 self.settings.setValue("last_ip", text)
+                self.settings.setValue("last_family", family)
 
         def open_file(self):
             path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Open recording",
-                                                            self.settings.value("last_dir", ""), "Sonar (*.son)")
+                                                            self.settings.value("last_dir", ""),
+                                                            "Sonar recordings (*.son *.aris)")
             if path:
                 self.settings.setValue("last_dir", os.path.dirname(path))
                 self.connect_to(os.path.abspath(path))
 
-        def connect_to(self, source):
+        def connect_to(self, source, **options):
             self._close_sub()
-            info = self._call(self.c.connect, source)
+            info = self._call(self.c.connect, source, **options)
             if info is None:
                 self._set_connected(False)
                 return False
@@ -740,7 +756,7 @@ def build(service=None, settings=None):
             self.ctl_head.clear()
             for h in info["heads"]:
                 f = h.get("center_freq") or 0
-                text = f"{h['index']}  {h['model']}  {f / 1000:g} kHz"
+                text = f"{h['index']}  {h['model']}" + (f"  {f / 1000:g} kHz" if f else "")
                 it = QtWidgets.QListWidgetItem(text)
                 it.setFlags(it.flags() | QtCore.Qt.ItemIsUserCheckable)
                 it.setCheckState(QtCore.Qt.Checked if h["index"] in ticked else QtCore.Qt.Unchecked)
@@ -815,6 +831,7 @@ def build(service=None, settings=None):
                 self.gain.setValue(float(h["gain"]))
             if h.get("tvg") is not None:
                 self.tvg.setValue(float(h["tvg"]))
+            self.tvg.setEnabled(bool(self.info["live"]) and h.get("tvg") is not None)   # not every sonar has TVG
             self.range_stop.setValue(min(hi, float(self.settings.value(f"range_stop/{h['model']}", hi))))
             self.range_slider.setValue(int(self.range_stop.value() * 10))
 

@@ -1,6 +1,6 @@
 """Command line.
 
-opensonar export FILE.son DIR/ [--format png|tiff|npz] [--type xy|rtheta] [--ping N]
+opensonar export FILE.son|FILE.aris DIR/ [--format png|tiff|npz] [--type xy|rtheta] [--ping N]
 opensonar live IP|FILE.son [--head N] [--range [START] STOP] [--gain G] [--tvg T] [--npz DIR] [--record FILE.son] [--pings N]
 opensonar discover
 """
@@ -10,8 +10,7 @@ import os
 import sys
 import time
 
-from .son import SonFile, SonError, OpenSonarError
-from .image import rtheta, xy
+from .son import SonError, OpenSonarError
 
 
 def _save(img, geo, kind, fmt, path, ping):
@@ -20,28 +19,28 @@ def _save(img, geo, kind, fmt, path, ping):
 
 
 def export(path, out_dir, fmt="png", kind="xy", pings=None, out=print, head=0, progress=None):
-    """Exports pings of a .son as 16-bit PNG/TIFF, NPY or NPZ (one file per ping), or one MP4 video.
+    """Exports pings of a recording (.son or .aris) as 16-bit PNG/TIFF, NPY or NPZ (one file per ping), or one MP4 video.
     progress(done, total) → False cancels."""
     if fmt == "mp4":
         from .media import export as media_export
         done = media_export(path, out_dir, ["mp4"], kind, pings, head, progress=progress)
         out(f"{done} ping(s) in a video in {out_dir}")
         return done
-    son = SonFile(path)
-    config = son.heads[head]
+    from .sdk import open as open_sonar
+    sonar = open_sonar(path)
+    h = sonar.head(head)
     os.makedirs(out_dir, exist_ok=True)
     base = os.path.splitext(os.path.basename(path))[0]
     ext = {"png": "png", "tiff": "tif", "npz": "npz", "npy": "npy"}[fmt]
-    render = xy if kind == "xy" else rtheta
-    n = son.n_pings(head)
+    n = h.n_pings
     indices = list(range(n) if pings is None else pings)
     suffix = f"_h{head}" if head else ""
     done = 0
     for i in indices:
         if not 0 <= i < n:
             raise SonError(f"ping {i} out of range 0..{n - 1}")
-        ping = son.ping(i, head)
-        img, geo = render(config, ping)
+        ping = h.ping(i)
+        img, geo = h.image(ping, kind)
         target = os.path.join(out_dir, f"{base}{suffix}_{kind}_{i:05d}.{ext}")
         _save(img, geo, kind, fmt, target, ping)
         done += 1
@@ -88,7 +87,7 @@ def live(source, head=0, range_=None, gain=None, tvg=None, npz=None, n_pings=Non
         return n
 
     from .sdk import open as open_sonar
-    from .writer import SonWriter
+    from .writer import raw_writer
     with open_sonar(source) as s:
         _banner(s, out)
         h = s.head(head)
@@ -102,7 +101,7 @@ def live(source, head=0, range_=None, gain=None, tvg=None, npz=None, n_pings=Non
             h.adjust_tvg(tvg)
         if npz:
             os.makedirs(npz, exist_ok=True)
-        writer = SonWriter.for_sonar(record, s) if record else None
+        writer = raw_writer(record, s)[0] if record else None
         t0, k = time.time(), 0
         try:
             for p in h.pings(n=n_pings):
@@ -113,7 +112,8 @@ def live(source, head=0, range_=None, gain=None, tvg=None, npz=None, n_pings=Non
                     _save(img, geo, "xy", "npz", os.path.join(npz, f"ping_{k:05d}.npz"), p)
                 k += 1
                 out(f"ping {p.number}: {p.range_start:.2f}–{p.range_stop:.2f} m, "
-                    f"{p.signals[0].size} samples, {k / (time.time() - t0):.1f} pings/s")
+                    f"{p.signals[0].size if p.signals else p.n_samples} samples, "
+                    f"{k / (time.time() - t0):.1f} pings/s")
         except KeyboardInterrupt:
             out("interrupted")
         finally:
@@ -168,8 +168,8 @@ def ctl(address, words, out=print):
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="opensonar", description="Open SDK for P900 and M900 sonars.")
     sub = ap.add_subparsers(dest="command", required=True)
-    ex = sub.add_parser("export", help="export images from a .son file")
-    ex.add_argument("file", help=".son file")
+    ex = sub.add_parser("export", help="export images from a .son or .aris file")
+    ex.add_argument("file", help=".son or .aris file")
     ex.add_argument("out_dir", help="output directory")
     ex.add_argument("--format", choices=("png", "tiff", "npy", "npz", "mp4"), action="append",
                     help="png/tiff: lossless 16 bit; npy: uint16 array; npz: uint16 array + metadata; "

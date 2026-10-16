@@ -11,6 +11,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/SonarInfo.msg"
   "msg/SonarStatus.msg"
   "msg/EventMark.msg"
+  "msg/BeamFrame.msg"
   DEPENDENCIES std_msgs
 )
 

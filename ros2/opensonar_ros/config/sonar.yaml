@@ -1,7 +1,9 @@
 # Example parameters of opensonar_ros/sonar_node (ros2 launch opensonar_ros sonar.launch.py params:=…)
 sonar:
   ros__parameters:
-    source: "192.168.1.45"        # sonar IP; "127.0.0.1:1149" for the emulator; or a .son path
+    source: "192.168.1.45"        # sonar IP; "127.0.0.1:1149" for the emulator; or a .son / .aris path
+    family: ""                    # "aris" for a live sonar of the .aris family
+    system_type: -1               # .aris family: 0, 1 or 2; < 0 = from the sonar beacon
     heads: [0, 3]                 # M900/2250: 0 = M2250-130 (2.25 MHz), 3 = M900-130 (900 kHz)
     range: [10.0]                 # stop range (m) for every head, or [start, stop]; [0.0] = keep the sonar's
     gain: -1.0                    # < 0 = keep the sonar's

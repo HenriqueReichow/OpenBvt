@@ -9,12 +9,12 @@ import multiprocessing as mp
 import os
 import time
 
-from . import image as _image
+from .frame import render
 
 
 def _worker(conn, source, head, settings, record, npz, real_time):
     from .sdk import open as open_sonar
-    from .writer import SonWriter
+    from .writer import raw_writer
     writer = None
     n = 0
     try:
@@ -29,8 +29,9 @@ def _worker(conn, source, head, settings, record, npz, real_time):
                 h.adjust_tvg(settings["tvg"])
             conn.send(("info", dict(live=s.live, model=s.model, sonar_type=s.sonar_type, serial=s.serial,
                                     firmware=s.firmware, clock_offset=s.clock_offset,
-                                    configs=[c.config for c in s.heads])))
-            writer = SonWriter.for_sonar(record, s) if record else None
+                                    configs=[c.config for c in s.heads],
+                                    heads=[(c.model, tuple(c.limits)) for c in s.heads])))
+            writer = raw_writer(record, s)[0] if record else None
             if npz:
                 os.makedirs(npz, exist_ok=True)
             wants, pending, previous = False, None, None
@@ -140,19 +141,12 @@ class RemoteStream:
 
 
 class RemoteHead:
-    def __init__(self, sonar, index, config):
+    def __init__(self, sonar, index, config, model, limits):
         self.sonar, self.index, self.config = sonar, index, config
-
-    @property
-    def model(self):
-        return self.config.model
-
-    @property
-    def limits(self):
-        return self.config.range_min, self.config.range_max
+        self.model, self.limits = model, limits
 
     def image(self, ping, kind="xy"):
-        return (_image.xy if kind == "xy" else _image.rtheta)(self.config, ping)
+        return render(self.config, ping, kind)
 
     def adjust_range(self, start, stop):
         self.sonar._conn.send(("range", float(start), float(stop)))
@@ -164,7 +158,7 @@ class RemoteHead:
 
     def __repr__(self):
         lo, hi = self.limits
-        return f"<Head {self.index} {self.model} {lo:.1f}–{hi:.1f} m, {len(self.config.transducers)} transducers>"
+        return f"<Head {self.index} {self.model} {lo:.1f}–{hi:.1f} m>"
 
 
 class RemoteSonar:
@@ -190,7 +184,7 @@ class RemoteSonar:
         info = msg[1]
         self.live, self.model, self.sonar_type = info["live"], info["model"], info["sonar_type"]
         self.serial, self.firmware, self.clock_offset = info["serial"], info["firmware"], info["clock_offset"]
-        self.heads = [RemoteHead(self, i, c) for i, c in enumerate(info["configs"])]
+        self.heads = [RemoteHead(self, i, c, *m) for i, (c, m) in enumerate(zip(info["configs"], info["heads"]))]
         self._index = head
         self._stream = RemoteStream(self)
 

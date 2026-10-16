@@ -127,21 +127,22 @@ def fan_rgb(img, mapper, background=(0, 0, 0)):
 
 def export(path, out_dir, formats=("png",), kind="xy", pings=None, head=0, mapper=None, fps=None,
            progress=None):
-    """Exports pings of a .son in several formats at once.
+    """Exports pings of a recording (.son or .aris) in several formats at once.
 
     formats: any of npy, npz, png, tiff (one file per ping + index.csv, in out_dir/<name>_<fmt>/h<head>/)
     and mp4 (out_dir/<name>_h<head>_<kind>.mp4, coloured with `mapper`, default Copper + auto intensity;
     fps None = the recorded ping rate). progress(done, total) → False cancels. Returns the number of pings.
     """
     from . import display
-    from .image import rtheta, xy
-    from .son import SonError, SonFile
-    son = SonFile(path)
-    config = son.heads[head]
-    n = son.n_pings(head)
+    from .sdk import open as open_sonar
+    from .son import SonError
+    sonar = open_sonar(path)
+    h = sonar.head(head)
+    n = h.n_pings
     indices = list(range(n) if pings is None else pings)
     for i in indices:
         if not 0 <= i < n:
+            sonar.close()
             raise SonError(f"ping {i} out of range 0..{n - 1}")
     unknown = set(formats) - set(IMAGE_FORMATS) - {"mp4"}
     if unknown:
@@ -152,16 +153,16 @@ def export(path, out_dir, formats=("png",), kind="xy", pings=None, head=0, mappe
     video = None
     if "mp4" in formats:
         if fps is None:
-            t = [son.ping(i, head).timestamp for i in indices[:50]]
+            t = [h.ping(i).timestamp for i in indices[:50]]
             dt = np.median(np.diff(t)) if len(t) > 1 else 0.1
             fps = min(max(1.0 / dt if dt > 0 else 10.0, 1.0), 60.0)
         video = VideoWriter(os.path.join(out_dir, f"{name}_h{head}_{kind}.mp4"), fps)
         mapper = mapper or display.ColorMapper(display.colormap("Copper"))
-    render = (lambda p: xy(config, p, crop=True)) if kind == "xy" else (lambda p: rtheta(config, p))
+    render = (lambda p: h.image(p, "xy", crop=True)) if kind == "xy" else (lambda p: h.image(p, "rtheta"))
     done = 0
     try:
         for i in indices:
-            p = son.ping(i, head)
+            p = h.ping(i)
             img, geo = render(p)
             sink.write(head, p, img, geo)
             if video is not None:
@@ -171,6 +172,7 @@ def export(path, out_dir, formats=("png",), kind="xy", pings=None, head=0, mappe
                 break
     finally:
         sink.close()
+        sonar.close()
         if video is not None:
             video.close()
     return done

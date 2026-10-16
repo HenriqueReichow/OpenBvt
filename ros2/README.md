@@ -4,7 +4,7 @@ Two packages:
 
 | Package | Type | What |
 |---|---|---|
-| `opensonar_msgs` | ament_cmake | `RawPing`, `SonarInfo`, `SonarStatus`, `EventMark`, `TransducerConfig` |
+| `opensonar_msgs` | ament_cmake | `RawPing`, `BeamFrame`, `SonarInfo`, `SonarStatus`, `EventMark`, `TransducerConfig` |
 | `opensonar_ros` | ament_python | `sonar_node` (publishes the sonar) |
 
 `sonar_node` is a **client of the opensonar service** (`opensonar server`, [`../docs/SERVER.md`](../docs/SERVER.md)):
@@ -64,7 +64,8 @@ Under the node's namespace (default `/sonar`), for each head N in `heads`:
 | Topic | Type | QoS | Content |
 |---|---|---|---|
 | `headN/image` | `sensor_msgs/Image` `mono16` | best effort, depth 5 | XY fan, cropped to the range; row 0 = farthest, the sonar at the bottom centre |
-| `headN/raw` | `opensonar_msgs/RawPing` | reliable, depth 200 | raw 12-bit signal of every transducer (+ Q), bins/resolution of this ping, compact configuration |
+| `headN/raw` | `opensonar_msgs/RawPing` | reliable, depth 200 | P900/M900: raw 12-bit signal of every transducer (+ Q), bins/resolution of this ping, compact configuration |
+| `headN/frame` | `opensonar_msgs/BeamFrame` | reliable, depth 200 | `.aris` family (instead of `raw`): u8 intensities, samples × beams (row 0 = nearest), range start and step, beam angles (+ left) |
 | `headN/info` | `opensonar_msgs/SonarInfo` | reliable, **transient_local** | head description, published on connect and when range, gain, TVG, sound speed or the ping rate (> 10 %) change |
 | `status` | `opensonar_msgs/SonarStatus` | depth 10, 1 Hz | connection, pinging, published/received/lost pings, recording, clock offset, error |
 | `events` | `opensonar_msgs/EventMark` | depth 50 | event marks (GUI ⚑ Mark, `opensonar ctl mark`) |
@@ -110,13 +111,15 @@ The service's own test checks that this rebuilds identical XY and R-Theta images
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| `source` | `192.168.1.45` | sonar IP, `ip:port` (emulator) or a `.son` path |
+| `source` | `192.168.1.45` | sonar IP, `ip:port` (emulator), or a `.son` / `.aris` path |
+| `family` | `""` | `"aris"` for a live sonar of the `.aris` family (also `family:=aris` in the launch file) |
+| `system_type` | `-1` | `.aris` family: 0, 1 or 2; < 0 = from the sonar beacon |
 | `heads` | `[0]` | heads to ping (in turn) and publish |
 | `range` | `[0.0]` | `[stop]` or `[start, stop]` in m for every head; `[0.0]` keeps the sonar's |
 | `gain`, `tvg` | `-1.0` | < 0 keeps the sonar's |
 | `frame_prefix` | `sonar_head` | frame of head N |
 | `smooth` | `true` | 3×3 mean on the images |
-| `replay_speed` | `1.0` | `.son` source: 1 = recorded pace (with the recorded stamps), 2 = twice as fast, 0 = as fast as possible |
+| `replay_speed` | `1.0` | `.son` / `.aris` source: 1 = recorded pace (with the recorded stamps), 2 = twice as fast, 0 = as fast as possible |
 | `publish_image`, `publish_raw`, `publish_info`, `publish_diagnostics` | `true` | which topics |
 | `image_qos_depth`, `raw_qos_depth` | 5, 200 | history depths |
 | `service_host`, `rep_port`, `pub_port` | `127.0.0.1`, 4545, 4546 | the opensonar service |

@@ -164,7 +164,7 @@ def beam_angles_for(h):
     return np.deg2rad(np.asarray(BEAM_ANGLES[lens_table(n, h["system_type"], h["large_lens"])][::-1]))
 
 
-def build_frame(h, data, beam_angles):
+def build_frame(h, data, beam_angles, raw_header=None):
     """Frame from a header dict and its ordered (samples × beams) u8 data (beam 0 = right-most)."""
     if not h["reordered"]:
         raise ArisError(f"frame {h['index']}: samples are not ordered")
@@ -174,7 +174,7 @@ def build_frame(h, data, beam_angles):
     stamp = h["frame_time"] or h["pc_time"]
     return Frame(number=h["index"], timestamp=stamp * 1e-6, intensity=data[:, ::-1].copy(),
                  ranges=start + step * np.arange(data.shape[0]), beam_angles=beam_angles,
-                 sound_speed=float(c))
+                 sound_speed=float(c), raw_header=raw_header)
 
 
 class ArisFile:
@@ -213,12 +213,32 @@ class ArisFile:
         if h["samples_per_beam"] != self.n_samples or beams_from_ping_mode(h["ping_mode"]) != self.n_beams:
             raise ArisError(f"frame {i}: the frame size changes inside the file")
         data = np.frombuffer(raw, np.uint8, offset=HEADER_SIZE).reshape(self.n_samples, self.n_beams)
-        return build_frame(h, data, self.beam_angles)
+        return build_frame(h, data, self.beam_angles, raw[:HEADER_SIZE])
 
     def _seek(self, i):
         if not 0 <= i < self.n_frames:
             raise ArisError(f"frame {i} out of range 0..{self.n_frames - 1}")
         self._f.seek(HEADER_SIZE + i * self.frame_size)
+
+    def close(self):
+        self._f.close()
+
+
+class ArisWriter:
+    """Writes frames that came from a .aris file or sonar (they carry their raw header) to a .aris file."""
+
+    def __init__(self, path):
+        self.path, self.count = path, 0
+        self._f = open(path, "wb")
+        self._f.write(struct.pack("<I", SIGNATURE).ljust(HEADER_SIZE, b"\0"))
+
+    def add(self, frame, head=0):
+        if frame.raw_header is None:
+            raise ArisError("only frames read from .aris data can be written")
+        h = bytearray(frame.raw_header.ljust(HEADER_SIZE, b"\0")[:HEADER_SIZE])
+        struct.pack_into("<I", h, 516, 1)                          # the samples go out ordered
+        self._f.write(bytes(h) + np.ascontiguousarray(frame.intensity[:, ::-1], np.uint8).tobytes())
+        self.count += 1
 
     def close(self):
         self._f.close()

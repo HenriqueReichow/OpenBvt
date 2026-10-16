@@ -18,8 +18,8 @@ opensonar gui
 │  [Discover sonars]    │   head 0 — M2250-130     head 3 — M900-130     │
 │  Model | Serial | IP  │      (fan in metres,        (one panel per     │
 │  [Connect to selected]│       range rings and       ticked head)       │
-│  [IP........][Connect]│       bearing lines)                           │
-│  [Open .son…]         │                                                │
+│  [IP....][type][Conn.]│       bearing lines)                           │
+│  [Open recording…]    │                                                │
 │  [Disconnect]         │                                                │
 │ Heads (tick to show)  │                                                │
 │ Acquisition           │                                                │
@@ -58,8 +58,8 @@ The sonar answers about 40 s after power-on.
 | **Configure sonar network** | activates the opensonar-net profile and pings the sonar (see above) |
 | **Discover sonars** | multicast discovery (2 s). For each sonar found, the service connects briefly and fills in **Model**, **Serial** and **IP**. A sonar that is already connected keeps its connection. |
 | **Connect to selected** / double click | connects to the selected row |
-| IP field + **Connect** | connects to `ip` or `ip:port` (an emulator on another port, for example). The last IP is remembered. |
-| **Open .son…** | opens a recording on this PC. **Start** plays it at the recorded pace, once. |
+| IP field + type + **Connect** | connects to `ip` or `ip:port` (an emulator on another port, for example). The type selects the protocol: **P900 / M900** or **.aris sonar** (discovery fills it in). The last IP and type are remembered. |
+| **Open recording…** | opens a `.son` or `.aris` recording on this PC. **Start** plays it at the recorded pace, once. |
 | **Disconnect** | stops pinging and closes the connection |
 
 ## Heads

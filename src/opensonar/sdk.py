@@ -259,7 +259,8 @@ class FrameHead(Head):
     model = property(lambda self: self._model)
     transducers = property(lambda self: [])
     limits = property(lambda self: (float(self._first.ranges[0]), float(self._first.ranges[-1])))
-    gain = tvg = center_freq = property(lambda self: None)
+    tvg = center_freq = property(lambda self: None)
+    gain = property(lambda self: getattr(self.sonar, "gain", None))
     sound_speed = property(lambda self: self._first.sound_speed)
 
     def frame(self, ping):
@@ -268,12 +269,9 @@ class FrameHead(Head):
     def image(self, ping, kind="xy", smooth=True, crop=False):
         """(image, geometry) of the frame. kind: "xy" (fan) or "rtheta" (row 0 = far range).
         smooth and crop do not apply: the frame is already beamformed and holds only its window."""
-        if kind == "xy":
-            return _frame.to_xy(ping)
-        if kind == "rtheta":
-            return ping.intensity[::-1], dict(rows=ping.n_samples, cols=ping.n_beams,
-                                              ranges=ping.ranges[::-1], angles=ping.beam_angles)
-        raise ApiError(f"unknown image kind: {kind!r}")
+        if kind not in ("xy", "rtheta"):
+            raise ApiError(f"unknown image kind: {kind!r}")
+        return _frame.render(None, ping, kind)
 
     def __repr__(self):
         lo, hi = self.limits
@@ -328,6 +326,10 @@ class LiveArisSonar(Sonar):
         self.clock_offset = 0.0
         self.heads = [FrameHead(self, 0, r.model, first)]
         self._lock = threading.Lock()
+
+    @property
+    def gain(self):
+        return self._net.settings["receiver_gain"]
 
     def _n_pings(self, head):
         return None

@@ -1,8 +1,10 @@
-"""sonar_node: publishes a P900 or M900 sonar (through the opensonar service) on ROS 2.
+"""sonar_node: publishes a sonar (through the opensonar service) on ROS 2: P900/M900, or one of the
+.aris family (parameter family: "aris").
 
 Per head N (topics under the node namespace, ~/headN/…):
     image     sensor_msgs/Image mono16      the XY fan (row 0 = farthest), best effort
-    raw       opensonar_msgs/RawPing          raw signal + compact configuration, reliable
+    raw       opensonar_msgs/RawPing          raw signal + compact configuration, reliable (P900/M900)
+    frame     opensonar_msgs/BeamFrame        intensities on a range × beam grid, reliable (.aris family)
     info      opensonar_msgs/SonarInfo        head description, transient_local, on connect and on changes
 and ~/status (opensonar_msgs/SonarStatus), ~/events (opensonar_msgs/EventMark), /diagnostics.
 header.stamp is the ping's UTC time, corrected for the sonar clock (docs/SYNC.md).
@@ -16,7 +18,7 @@ import numpy as np
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
-from opensonar_msgs.msg import EventMark, RawPing, SonarInfo, SonarStatus, TransducerConfig
+from opensonar_msgs.msg import BeamFrame, EventMark, RawPing, SonarInfo, SonarStatus, TransducerConfig
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
@@ -47,8 +49,8 @@ def raw_msg(ping, header, cfg):
     m = ping.meta
     out = RawPing(header=header, serial=m["serial"], head=int(m["head"]), number=int(m["number"]), seq=int(m["seq"]),
                   tz_offset=int(m["tz_offset"]), range_start=float(m["range_start"]), range_stop=float(m["range_stop"]),
-                  sound_speed=float(m.get("sound_speed", 0.0)), gain=float(m.get("gain", 0.0)),
-                  tvg=float(m.get("tvg", 0.0)), range_bins=int(m.get("bins", 0)), beams=int(m.get("beams", 0)),
+                  sound_speed=float(m.get("sound_speed") or 0.0), gain=float(m.get("gain") or 0.0),
+                  tvg=float(m.get("tvg") or 0.0), range_bins=int(m.get("bins", 0)), beams=int(m.get("beams", 0)),
                   range_resolution=float(m.get("res", 0.0)), bin_range_near=float(m.get("bin_near", 0.0)),
                   bin_range_far=float(m.get("bin_far", 0.0)), config_id=m.get("config_id", ""))
     out.samples = array("I", [int(s.size) for s in ping.signals])
@@ -56,11 +58,24 @@ def raw_msg(ping, header, cfg):
         out.signal = array("H", np.concatenate(ping.signals).astype("<u2").tobytes())
     if ping.signals_q:
         out.signal_q = array("H", np.concatenate(ping.signals_q).astype("<u2").tobytes())
-    if cfg:
+    if cfg and "sample_rate" in cfg:
         out.sample_rate, out.pulse_sample_rate = int(cfg["sample_rate"]), int(cfg["pulse_sample_rate"])
         out.element_spacing, out.mapping_method = float(cfg["element_spacing"]), int(cfg["mapping_method"])
         out.transducers = transducers_msg(cfg)
     return out
+
+
+def frame_msg(ping, header, cfg):
+    """BeamFrame from the R-Theta image of a frame (row 0 = far range there, nearest here)."""
+    m = ping.meta
+    img = ping.images["rtheta"][0][::-1]
+    angles = -np.asarray(cfg.get("beam_angles", []), np.float32)          # opensonar: + right → ROS: + left
+    return BeamFrame(header=header, serial=m["serial"], head=int(m["head"]), number=int(m["number"]),
+                     seq=int(m["seq"]), sound_speed=float(m.get("sound_speed") or 0.0),
+                     gain=float(m.get("gain") or 0.0), samples=int(img.shape[0]), beams=int(img.shape[1]),
+                     range_start=float(m["range_start"]), range_resolution=float(m.get("res") or 0.0),
+                     beam_angles=angles.tolist(), vertical_fov=0.0,
+                     intensity=array("B", np.ascontiguousarray(img, np.uint8).tobytes()))
 
 
 def image_msg(img, header):
@@ -75,7 +90,9 @@ class SonarNode(Node):
     def __init__(self):
         super().__init__("sonar")
         p = self.declare_parameter
-        p("source", "192.168.1.45")            # sonar IP, ip:port (emulator) or a .son file
+        p("source", "192.168.1.45")            # sonar IP, ip:port (emulator), or a .son / .aris file
+        p("family", "")                        # "aris" for a live sonar of the .aris family
+        p("system_type", -1)                   # .aris family: 0, 1 or 2; < 0 = from the sonar beacon
         p("heads", [0])
         p("range", [0.0])                      # [stop] or [start, stop] in m for every head; [0] = keep
         p("gain", -1.0)                        # < 0 = keep
@@ -135,6 +152,7 @@ class SonarNode(Node):
                 self.pubs[("image", h)] = self.create_publisher(Image, f"~/head{h}/image", best)
             if self.want["raw"]:
                 self.pubs[("raw", h)] = self.create_publisher(RawPing, f"~/head{h}/raw", reliable)
+                self.pubs[("frame", h)] = self.create_publisher(BeamFrame, f"~/head{h}/frame", reliable)
             if self.want["info"]:
                 self.pubs[("info", h)] = self.create_publisher(SonarInfo, f"~/head{h}/info", latched)
         self.status_pub = self.create_publisher(SonarStatus, "~/status", 10)
@@ -145,9 +163,19 @@ class SonarNode(Node):
         self.rates = {h: [] for h in self.heads}
         self.last_info, self.last_meta, self.info_rate = {}, {}, {}
         self.status = {}
-        self.connect(g("source"))
+        options = {"family": g("family")} if g("family") else {}
+        if g("family") and g("system_type") >= 0:
+            options["system_type"] = int(g("system_type"))
+        self.connect(g("source"), **options)
         self.apply_settings(g("range"), g("gain"), g("tvg"))
-        kinds = ["xy"] if self.want["image"] else []
+        self.frames = self.info.get("sonar_type") == "aris"          # beamformed frames instead of raw signal
+        if self.frames:
+            for h in self.heads:
+                self.pubs.pop(("raw", h), None)
+        else:
+            for h in self.heads:
+                self.pubs.pop(("frame", h), None)
+        kinds = (["xy"] if self.want["image"] else []) + (["rtheta"] if self.frames and self.want["raw"] else [])
         speed = None if self.info["live"] or g("replay_speed") <= 0 else float(g("replay_speed"))
         self.cmd.call("start", heads=self.heads, image=kinds or False, smooth=bool(g("smooth")), speed=speed)
         self._stop = threading.Event()
@@ -158,12 +186,12 @@ class SonarNode(Node):
                                f" ({'live' if self.info['live'] else 'file'} {self.info['source']})")
 
     # --- service ---
-    def connect(self, source):
+    def connect(self, source, **options):
         st = self.cmd.call("status")
         if st["connected"] and st["source"] == source:
             self.get_logger().info(f"the service is already connected to {source}")
         else:
-            self.cmd.call("connect", source=source, timeout=60.0)
+            self.cmd.call("connect", source=source, timeout=60.0, **options)
         self.info = self.cmd.call("heads")
         try:
             self.config = {c["head"]: c for c in self.cmd.call("config")["heads"]}
@@ -189,7 +217,7 @@ class SonarNode(Node):
                 self.cmd.call("range", head=h, start=r[0], stop=r[1])
             if gain >= 0:
                 self.cmd.call("gain", head=h, value=float(gain))
-            if tvg >= 0:
+            if tvg >= 0 and self.info["heads"][h].get("tvg") is not None:
                 self.cmd.call("tvg", head=h, value=float(tvg))
 
     # --- pings ---
@@ -228,6 +256,8 @@ class SonarNode(Node):
         header = self.header(h, m["timestamp"])
         if ("raw", h) in self.pubs:
             self.pubs[("raw", h)].publish(raw_msg(ping, header, self.config.get(h)))
+        if ("frame", h) in self.pubs and "rtheta" in ping.images:
+            self.pubs[("frame", h)].publish(frame_msg(ping, header, self.config.get(h, {})))
         if ("image", h) in self.pubs and "xy" in ping.images:
             self.pubs[("image", h)].publish(image_msg(ping.images["xy"][0], header))
         key = (round(m["range_start"], 3), round(m["range_stop"], 3), m.get("gain"), m.get("tvg"),
@@ -244,26 +274,26 @@ class SonarNode(Node):
     def publish_info(self, h, m=None):
         cfg, hd = self.config[h], self.info["heads"][h]
         angles = -np.asarray(cfg.get("beam_angles", []), np.float32)          # opensonar: + right → ROS: + left
-        pulse = decode_b64(cfg["pulse"], "<c8")
         msg = SonarInfo(header=Header(stamp=self.get_clock().now().to_msg(), frame_id=f"{self.frame_prefix}{h}"),
                         serial=self.info["serial"], sonar_model=self.info["model"], firmware=self.firmware, head=h,
                         head_model=hd["model"], center_freq=int(hd.get("center_freq") or 0),
                         beams=int(cfg.get("beams", 0)), beam_angles=angles.tolist(),
                         field_of_view=float(abs(angles[-1] - angles[0])) if angles.size else 0.0,
                         range_min_limit=float(hd["limits"][0]), range_max_limit=float(hd["limits"][1]),
-                        config_id=cfg["config_id"], sample_rate=int(cfg["sample_rate"]),
-                        pulse_sample_rate=int(cfg["pulse_sample_rate"]),
-                        element_spacing=float(cfg["element_spacing"]), mapping_method=int(cfg["mapping_method"]),
-                        transducers=transducers_msg(cfg),
-                        pulse_real=array("f", pulse.real.astype("<f4").tobytes()),
-                        pulse_imag=array("f", pulse.imag.astype("<f4").tobytes()),
-                        normalization=array("f", decode_b64(cfg["normalization"], "<f4").tobytes()),
-                        ping_rate=float(self.ping_rate(h)))
+                        config_id=cfg["config_id"], ping_rate=float(self.ping_rate(h)))
+        if "sample_rate" in cfg:                    # raw-signal heads: what is needed to reprocess them
+            pulse = decode_b64(cfg["pulse"], "<c8")
+            msg.sample_rate, msg.pulse_sample_rate = int(cfg["sample_rate"]), int(cfg["pulse_sample_rate"])
+            msg.element_spacing, msg.mapping_method = float(cfg["element_spacing"]), int(cfg["mapping_method"])
+            msg.transducers = transducers_msg(cfg)
+            msg.pulse_real = array("f", pulse.real.astype("<f4").tobytes())
+            msg.pulse_imag = array("f", pulse.imag.astype("<f4").tobytes())
+            msg.normalization = array("f", decode_b64(cfg["normalization"], "<f4").tobytes())
         if m is not None:
             msg.range_start, msg.range_stop = float(m["range_start"]), float(m["range_stop"])
             msg.range_bins, msg.range_resolution = int(m.get("bins", 0)), float(m.get("res", 0.0))
             msg.bin_range_near, msg.bin_range_far = float(m.get("bin_near", 0.0)), float(m.get("bin_far", 0.0))
-            msg.sound_speed, msg.gain, msg.tvg = (float(m.get(k, 0.0)) for k in ("sound_speed", "gain", "tvg"))
+            msg.sound_speed, msg.gain, msg.tvg = (float(m.get(k) or 0.0) for k in ("sound_speed", "gain", "tvg"))
         else:
             msg.sound_speed, msg.gain, msg.tvg = float(cfg["sound_speed"]), float(hd.get("gain") or 0), float(hd.get("tvg") or 0)
         self.info_rate[h] = msg.ping_rate

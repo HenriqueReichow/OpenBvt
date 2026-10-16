@@ -372,3 +372,55 @@ def test_ticked_heads_are_remembered(qtbot, window):
     w.disconnect()
     w.connect_to(DUAL)
     assert w.selected_heads() == [3]
+
+
+def _aris_file(d):
+    sys.path.insert(0, os.path.dirname(__file__))
+    from test_aris import write_aris
+    path = os.path.join(d, "t.aris")
+    rng = np.random.default_rng(3)
+    write_aris(path, [rng.integers(0, 256, (200, 48), dtype=np.uint8) for _ in range(5)], system_type=2)
+    return path
+
+
+def test_aris_file_playback(qtbot, window):
+    w = window
+    with tempfile.TemporaryDirectory() as d:
+        w.connect_to(_aris_file(d))
+        assert w.info["live"] is False and w.info["sonar_type"] == "aris"
+        assert w.heads.count() == 1 and "kHz" not in w.heads.item(0).text()
+        w.btn_start.click()
+        img = _wait_image(qtbot, w.views[0])
+        assert img is not None
+        w.btn_stop.click()
+        w.disconnect()
+
+
+def test_aris_live_by_ip_and_family(qtbot, window):
+    from aris_emulator import Emulator
+    from opensonar.aris_net import COMMAND_PORT
+    w = window
+    with tempfile.TemporaryDirectory() as d:
+        emu = Emulator(_aris_file(d), frame_rate=20)
+        try:
+            srv = socket.create_server(("127.0.0.1", COMMAND_PORT))
+            srv.close()
+        except OSError:
+            pytest.skip(f"TCP port {COMMAND_PORT} busy")
+        threading.Thread(target=emu.serve_tcp, args=(COMMAND_PORT, "127.0.0.1"), daemon=True).start()
+        while emu.tcp_port is None:
+            time.sleep(0.01)
+        try:
+            w.ip.setText("127.0.0.1")
+            w.family.setCurrentIndex(w.family.findData("aris"))
+            # without a beacon the sonar type is unknown: the GUI passes the one from discovery
+            w.connect_ip(system_type=2)
+            assert w.info["live"] is True and w.info["model"] == "1200"
+            assert w.range_stop.isEnabled() and not w.tvg.isEnabled()      # no TVG on these sonars
+            assert w.settings.value("last_family") == "aris"
+            w.btn_start.click()
+            assert _wait_image(qtbot, w.views[0]) is not None
+            w.btn_stop.click()
+            w.disconnect()
+        finally:
+            emu.stop()

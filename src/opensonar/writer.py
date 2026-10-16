@@ -10,6 +10,7 @@ Layout: block 0 = header; configuration from block 1; one block chain per ping, 
 indices 1–5 at the end. Each block: u32 next, u32 previous, 4088 data bytes.
 Without `close()` the file has no index.
 """
+import os
 import struct
 import time
 import zlib
@@ -210,3 +211,14 @@ def copy_son(source, destination, pings=None):
                 if i < son.n_pings(h):
                     w.add(son.ping(i, h), h)
     return destination
+
+
+def raw_writer(path, sonar):
+    """(writer, path) for the lossless recording of `sonar` in its own format: .son for raw-signal
+    sonars, .aris for the ones whose frames come from .aris data. `path` may have either extension
+    or none; the right one is put in."""
+    base = os.path.splitext(path)[0] if os.path.splitext(path)[1].lower() in (".son", ".aris") else path
+    if getattr(sonar, "sonar_type", None) == "aris":
+        from .formats.aris import ArisWriter
+        return ArisWriter(base + ".aris"), base + ".aris"
+    return SonWriter.for_sonar(base + ".son", sonar), base + ".son"

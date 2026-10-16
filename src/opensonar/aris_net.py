@@ -299,7 +299,7 @@ class ArisNet:
             h["reordered"] = 1
         self.sound_speed = h["sound_speed"] or self.sound_speed
         self.serial = self.serial or h["serial"]
-        return aris.build_frame(h, ordered, aris.beam_angles_for(h))
+        return aris.build_frame(h, ordered, aris.beam_angles_for(h), raw_header)
 
     def close(self):
         self._closed.set()
