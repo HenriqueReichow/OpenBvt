@@ -130,6 +130,53 @@ def read_frame_header(data):
     return h
 
 
+# live data: each ping of a frame fires 16 beams; this is the beam (in units of pings) of each channel
+_CHANNEL_BEAM = np.array([10, 2, 14, 6, 8, 0, 12, 4, 11, 3, 15, 7, 9, 1, 13, 5])
+_PINGS_PER_FRAME = {1: 3, 3: 6, 6: 4, 9: 8}
+
+
+def _order(ping_mode, n_samples):
+    """Index in the ordered (samples × beams) array of each byte as it arrives unordered."""
+    pings = _PINGS_PER_FRAME.get(ping_mode)
+    if pings is None:
+        raise ArisError(f"ping mode {ping_mode} cannot be reordered")
+    n_beams = 16 * pings
+    p, s, c = np.meshgrid(np.arange(pings), np.arange(n_samples), np.arange(16), indexing="ij")
+    return (s * n_beams + p + _CHANNEL_BEAM[c] * pings).ravel()
+
+
+def reorder(data, ping_mode, n_samples):
+    """Unordered live bytes → ordered (samples × beams) array."""
+    data = np.frombuffer(data, np.uint8)
+    out = np.empty(data.size, np.uint8)
+    out[_order(ping_mode, n_samples)] = data
+    return out.reshape(n_samples, -1)
+
+
+def unorder(ordered, ping_mode):
+    """Inverse of reorder: ordered (samples × beams) array → bytes as the sonar sends them."""
+    return ordered.ravel()[_order(ping_mode, ordered.shape[0])].tobytes()
+
+
+def beam_angles_for(h):
+    """Beam angles (rad, increasing) for a frame header."""
+    n = beams_from_ping_mode(h["ping_mode"])
+    return np.deg2rad(np.asarray(BEAM_ANGLES[lens_table(n, h["system_type"], h["large_lens"])][::-1]))
+
+
+def build_frame(h, data, beam_angles):
+    """Frame from a header dict and its ordered (samples × beams) u8 data (beam 0 = right-most)."""
+    if not h["reordered"]:
+        raise ArisError(f"frame {h['index']}: samples are not ordered")
+    c = h["sound_speed"]
+    start = h["sample_start_delay"] * 1e-6 * c / 2
+    step = h["sample_period"] * 1e-6 * c / 2
+    stamp = h["frame_time"] or h["pc_time"]
+    return Frame(number=h["index"], timestamp=stamp * 1e-6, intensity=data[:, ::-1].copy(),
+                 ranges=start + step * np.arange(data.shape[0]), beam_angles=beam_angles,
+                 sound_speed=float(c))
+
+
 class ArisFile:
     """Read-only .aris recording; frames are read on demand."""
 
@@ -149,7 +196,7 @@ class ArisFile:
         self.serial = h["serial"]
         self.lens = lens_table(self.n_beams, h["system_type"], h["large_lens"])
         # our convention: columns in increasing angle, so beam 0 (right-most, largest angle) goes last
-        self.beam_angles = np.deg2rad(np.asarray(BEAM_ANGLES[self.lens][::-1], dtype=np.float64))
+        self.beam_angles = beam_angles_for(h)
         self.first = h
 
     def header(self, i):
@@ -166,15 +213,7 @@ class ArisFile:
         if h["samples_per_beam"] != self.n_samples or beams_from_ping_mode(h["ping_mode"]) != self.n_beams:
             raise ArisError(f"frame {i}: the frame size changes inside the file")
         data = np.frombuffer(raw, np.uint8, offset=HEADER_SIZE).reshape(self.n_samples, self.n_beams)
-        if not h["reordered"]:
-            raise ArisError(f"frame {i}: samples are not reordered (live sonar data is not supported here)")
-        c = h["sound_speed"]
-        start = h["sample_start_delay"] * 1e-6 * c / 2
-        step = h["sample_period"] * 1e-6 * c / 2
-        stamp = h["frame_time"] or h["pc_time"]
-        return Frame(number=h["index"], timestamp=stamp * 1e-6, intensity=data[:, ::-1].copy(),
-                     ranges=start + step * np.arange(self.n_samples), beam_angles=self.beam_angles,
-                     sound_speed=float(c))
+        return build_frame(h, data, self.beam_angles)
 
     def _seek(self, i):
         if not 0 <= i < self.n_frames:

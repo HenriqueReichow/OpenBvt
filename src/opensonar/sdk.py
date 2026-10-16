@@ -28,7 +28,11 @@ def open(source=None, **options):  # noqa: A001 — opensonar.open is the public
     source: path of a .son file; "ip" or "ip:port" of a sonar on the network (real or emulated);
     None = the first sonar that answers multicast discovery.
     options (network): timeout, sync_clock, discovery_timeout.
+    family="aris": a live sonar that records .aris files (options: system_type, timeout, command_port,
+    beacon_port, frame_ip); with source=None, the first one whose beacon is heard.
     """
+    if options.pop("family", None) == "aris":
+        return LiveArisSonar(source, **options)
     if source is None:
         from .net import discover
         found = discover(options.pop("discovery_timeout", 2.0))
@@ -301,6 +305,50 @@ class ArisFileSonar(Sonar):
 
     def close(self):
         self._file.close()
+
+
+class LiveArisSonar(Sonar):
+    """A live sonar of the .aris family (opensonar.aris_net), one head whose pings are `Frame`s."""
+    live = True
+
+    def __init__(self, host=None, **options):
+        from . import aris_net
+        if host is None:
+            found = aris_net.discover(options.pop("discovery_timeout", 2.0),
+                                      options.get("beacon_port", aris_net.BEACON_PORT))
+            if not found:
+                raise ApiError("no .aris sonar beacon heard")
+            host = found[0]["host"]
+            options.setdefault("system_type", found[0]["system_type"])
+        super().__init__(host)
+        self._net = aris_net.ArisNet(host, **options)
+        r = self._net
+        first = r.frame()
+        self.sonar_type, self.name, self.serial, self.firmware, self.fpga = "aris", r.model, r.serial, "", ""
+        self.clock_offset = 0.0
+        self.heads = [FrameHead(self, 0, r.model, first)]
+        self._lock = threading.Lock()
+
+    def _n_pings(self, head):
+        return None
+
+    def _ping(self, head, i):
+        with self._lock:
+            return self._net.frame()
+
+    def _adjust(self, head, what, value):
+        with self._lock:
+            if what == "range":
+                lo, hi = self._net.limits()
+                start, stop = value
+                self._net.adjust_range(max(float(start), lo), min(float(stop), hi))
+            elif what == "gain":
+                self._net.adjust_gain(value)
+            else:
+                raise ApiError(f"{what} cannot be adjusted on this sonar")
+
+    def close(self):
+        self._net.close()
 
 
 # file extension → Sonar class; each sonar family registers its recording format here

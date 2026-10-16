@@ -24,6 +24,7 @@ with opensonar.open("192.168.1.45") as s:        # or "recording.son", or "ip:po
 | any other existing file | `ApiError` (unknown format) |
 | `"ip"` or `"ip:port"` | `LiveSonar` through the native driver (`opensonar.net`); default port 1149 |
 | `None` | multicast discovery; opens the first sonar that answers |
+| `"ip"` or `None` with `family="aris"` | `LiveArisSonar` (`opensonar.aris_net`, [`ARIS_LIVE.md`](ARIS_LIVE.md)); `None` = first beacon heard. Options: `system_type` (0, 1, 2; default: from the beacon), `timeout`, `command_port`, `beacon_port`, `frame_ip`. `adjust_range` and `adjust_gain` work; `adjust_tvg` → `ApiError` |
 
 Live options: `timeout` (s per request, default 10), `sync_clock` (default `True`),
 `discovery_timeout` (s, with `source=None`).
