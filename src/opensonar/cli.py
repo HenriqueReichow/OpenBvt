@@ -1,6 +1,6 @@
 """Command line.
 
-opensonar export FILE.son|FILE.aris DIR/ [--format png|tiff|npz] [--type xy|rtheta] [--ping N]
+opensonar export FILE.son|FILE.aris|FILE.ddf DIR/ [--format png|tiff|npz] [--type xy|rtheta] [--ping N]
 opensonar live IP|FILE.son [--head N] [--range [START] STOP] [--gain G] [--tvg T] [--npz DIR] [--record FILE.son] [--pings N]
 opensonar discover
 """
@@ -168,8 +168,8 @@ def ctl(address, words, out=print):
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="opensonar", description="Open SDK for P900 and M900 sonars.")
     sub = ap.add_subparsers(dest="command", required=True)
-    ex = sub.add_parser("export", help="export images from a .son or .aris file")
-    ex.add_argument("file", help=".son or .aris file")
+    ex = sub.add_parser("export", help="export images from a .son, .aris or .ddf file")
+    ex.add_argument("file", help=".son, .aris or .ddf file")
     ex.add_argument("out_dir", help="output directory")
     ex.add_argument("--format", choices=("png", "tiff", "npy", "npz", "mp4"), action="append",
                     help="png/tiff: lossless 16 bit; npy: uint16 array; npz: uint16 array + metadata; "

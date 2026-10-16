@@ -177,7 +177,7 @@ class SonarNode(Node):
             options["system_type"] = int(g("system_type"))
         self.connect(g("source"), **options)
         self.apply_settings(g("range"), g("gain"), g("tvg"))
-        self.frames = self.info.get("sonar_type") == "aris"          # beamformed frames instead of raw signal
+        self.frames = self.info.get("sonar_type") in ("aris", "ddf")  # beamformed frames instead of raw signal
         if self.frames:
             for h in self.heads:
                 self.pubs.pop(("raw", h), None)

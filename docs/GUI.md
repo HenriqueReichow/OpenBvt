@@ -60,7 +60,7 @@ The sonar answers about 40 s after power-on.
 | **Connect to selected** / double click | connects to the selected row |
 | IP field + type + **Connect** | connects to `ip` or `ip:port` (an emulator on another port, for example). The type selects the protocol: **P900 / M900** or **.aris sonar** (discovery fills it in). The last IP and type are remembered. |
 | Status bar (`.aris` family) | *Connected, but no frames: the sonar may have refused the settings* when no frame arrived ~5 s after connecting; the reconnection notice when the connection dropped and came back. |
-| **Open recording…** | opens a `.son` or `.aris` recording on this PC. **Start** plays it at the recorded pace, once. |
+| **Open recording…** | opens a `.son`, `.aris` or `.ddf` recording on this PC. **Start** plays it at the recorded pace, once. |
 | **Disconnect** | stops pinging and closes the connection |
 
 ## Heads

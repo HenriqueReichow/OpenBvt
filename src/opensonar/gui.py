@@ -747,7 +747,7 @@ def build(service=None, settings=None):
         def open_file(self):
             path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Open recording",
                                                             self.settings.value("last_dir", ""),
-                                                            "Sonar recordings (*.son *.aris)")
+                                                            "Sonar recordings (*.son *.aris *.ddf)")
             if path:
                 self.settings.setValue("last_dir", os.path.dirname(path))
                 self.connect_to(os.path.abspath(path))

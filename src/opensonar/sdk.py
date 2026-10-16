@@ -32,6 +32,7 @@ def open(source=None, **options):  # noqa: A001 — opensonar.open is the public
     source: path of a .son file; "ip" or "ip:port" of a sonar on the network (real or emulated);
     None = the first sonar that answers multicast discovery.
     options (network): timeout, sync_clock, discovery_timeout.
+    options (.ddf file): sound_speed (m/s; these files do not record it, default 1457).
     family="aris": a live sonar that records .aris files (options: system_type, timeout, command_port,
     beacon_port, frame_ip); with source=None, the first one whose beacon is heard.
     """
@@ -47,7 +48,8 @@ def open(source=None, **options):  # noqa: A001 — opensonar.open is the public
     source = os.fspath(source)
     ext = os.path.splitext(source)[1].lower()
     if ext in FILE_FORMATS:
-        return FILE_FORMATS[ext](source)
+        file_options = {"sound_speed": options["sound_speed"]} if options.get("sound_speed") else {}
+        return FILE_FORMATS[ext](source, **file_options)
     if os.path.exists(source):
         raise ApiError(f"unknown file format: {ext or source!r} (known: {', '.join(sorted(FILE_FORMATS))})")
     return LiveSonar(source, **options)
@@ -288,15 +290,18 @@ class FrameHead(Head):
         return f"<Head {self.index} {self.model} {lo:.1f}–{hi:.1f} m, {self._first.n_beams} beams>"
 
 
-class ArisFileSonar(Sonar):
-    """A .aris recording (read-only, one head)."""
+class FrameFileSonar(Sonar):
+    """A recording of beamformed frames (read-only, one head); subclasses set the reader."""
+    sonar_type = None
+
+    def _reader(self, path):
+        raise NotImplementedError
 
     def __init__(self, path):
         super().__init__(path)
-        from .formats.aris import ArisFile
-        self._file = ArisFile(path)
+        self._file = self._reader(path)
         f = self._file
-        self.sonar_type, self.name, self.serial, self.firmware, self.fpga = "aris", f.model, f.serial, "", ""
+        self.name, self.serial, self.firmware, self.fpga = f.model, f.serial, "", ""
         self.clock_offset = 0.0
         self.heads = [FrameHead(self, 0, f.model, f.frame(0))]
 
@@ -313,6 +318,28 @@ class ArisFileSonar(Sonar):
 
     def close(self):
         self._file.close()
+
+
+class ArisFileSonar(FrameFileSonar):
+    """A .aris recording."""
+    sonar_type = "aris"
+
+    def _reader(self, path):
+        from .formats.aris import ArisFile
+        return ArisFile(path)
+
+
+class DdfFileSonar(FrameFileSonar):
+    """A .ddf recording. The files do not record the sound speed: `sound_speed` (m/s) sets it."""
+    sonar_type = "ddf"
+
+    def __init__(self, path, sound_speed=None):
+        self._sound_speed = sound_speed
+        super().__init__(path)
+
+    def _reader(self, path):
+        from .formats.ddf import NOMINAL_SOUND_SPEED, DdfFile
+        return DdfFile(path, self._sound_speed or NOMINAL_SOUND_SPEED)
 
 
 class LiveArisSonar(Sonar):
@@ -384,7 +411,7 @@ class LiveArisSonar(Sonar):
 
 
 # file extension → Sonar class; each sonar family registers its recording format here
-FILE_FORMATS = {".son": FileSonar, ".aris": ArisFileSonar}
+FILE_FORMATS = {".son": FileSonar, ".aris": ArisFileSonar, ".ddf": DdfFileSonar}
 
 
 class Stream:

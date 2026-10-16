@@ -17,7 +17,7 @@ import zlib
 
 import numpy as np
 
-from .son import (SIGNATURE, BLOCK_SIZE, REC_FEATURES, REC_SONAR, REC_TRANSDUCER, REC_HEAD_SETTINGS,
+from .son import (OpenSonarError, SIGNATURE, BLOCK_SIZE, REC_FEATURES, REC_SONAR, REC_TRANSDUCER, REC_HEAD_SETTINGS,
                   REC_PING_INFO, REC_ORIENTATION, REC_SIGNAL, REC_END, ORIENT_TRANSDUCER, SonFile)
 
 REVISION = 14
@@ -218,6 +218,8 @@ def raw_writer(path, sonar):
     sonars, .aris for the ones whose frames come from .aris data. `path` may have either extension
     or none; the right one is put in."""
     base = os.path.splitext(path)[0] if os.path.splitext(path)[1].lower() in (".son", ".aris") else path
+    if getattr(sonar, "sonar_type", None) == "ddf":
+        raise OpenSonarError("a .ddf recording cannot be recorded raw again; record the images instead")
     if getattr(sonar, "sonar_type", None) == "aris":
         from .formats.aris import ArisWriter
         return ArisWriter(base + ".aris"), base + ".aris"

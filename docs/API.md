@@ -21,6 +21,7 @@ with opensonar.open("192.168.1.45") as s:        # or "recording.son", or "ip:po
 |---|---|
 | a name ending in `.son` | `FileSonar` (read-only) |
 | a name ending in `.aris` | `ArisFileSonar` (read-only, one head whose pings are `Frame`s) |
+| a name ending in `.ddf` | `DdfFileSonar` (the same; option `sound_speed`, m/s, default 1457) |
 | any other existing file | `ApiError` (unknown format) |
 | `"ip"` or `"ip:port"` | `LiveSonar` through the native driver (`opensonar.net`); default port 1149 |
 | `None` | multicast discovery; opens the first sonar that answers |
